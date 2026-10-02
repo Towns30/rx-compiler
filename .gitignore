@@ -15,3 +15,7 @@ dev/
 *.local.*
 
 ChatHistory/
+
+/plan
+
+/guider.pdf
