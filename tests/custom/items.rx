@@ -1,0 +1,17 @@
+use math::add;
+
+fn main() {
+  let x = 1;
+}
+
+struct user {
+  name : String;
+}
+
+const NUM = 10;
+
+impl user {
+  fn Name(&self) -> String {
+    return self.name;
+  }
+}

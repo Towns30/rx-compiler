@@ -1,0 +1,11 @@
+fn larger(left: i32, right: i32) -> i32 {
+    if left > right {
+        return left;
+    } else {
+        return right;
+    }
+}
+
+fn main() {
+    let result: i32 = larger(10, 20);
+}
