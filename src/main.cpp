@@ -5,6 +5,7 @@
 
 #include "RxLexer.h"
 #include "RxParser.h"
+#include "frontend/AstBuilder.h"
 
 void printTree(antlr4::tree::ParseTree *node, const rx::RxParser &parser,
                int depth = 0)
@@ -49,5 +50,8 @@ int main(int argc, char *argv[])
   antlr4::CommonTokenStream tokens(&lexer);
   rx::RxParser parser(&tokens);
   auto *tree = parser.crate();
-  printTree(tree, parser);
+  AstBuilder ast_builder;
+  // printTree(tree, parser);
+  auto ast_tree = ast_builder.Build(tree);
+  ast_tree->print(0);
 }
