@@ -19,3 +19,11 @@ ChatHistory/
 /plan
 
 /guider.pdf
+
+/.xmake/
+
+/RegexGrammer.md
+
+/grammar/*.txt
+
+/build/

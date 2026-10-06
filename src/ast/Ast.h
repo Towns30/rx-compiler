@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -74,6 +75,45 @@ class BlockExpr;
 class Type;
 class ConstItem;
 
+struct GenericArg
+{
+  bool is_type_;
+  std::unique_ptr<Type> type_;
+  std::optional<std::string> life_time_;
+
+  GenericArg(bool is_type, std::unique_ptr<Type> type,
+             std::optional<std::string> life_time);
+
+  void print(int space_num);
+};
+
+struct PathSegment
+{
+  std::string name_; // Vec、new、self、Self
+  std::vector<GenericArg> generic_args_;
+
+  PathSegment(std::string name,
+                       std::vector<GenericArg> generic_args = {})
+      : name_(std::move(name)), generic_args_(std::move(generic_args))
+  {
+  }
+
+  void print(int space_num);
+};
+
+struct Path
+{
+  bool absolute_ = false; // 是否以 :: 开头
+  std::vector<PathSegment> segments_;
+
+  Path(std::vector<PathSegment> segments, bool absolute = false)
+      : absolute_(absolute), segments_(std::move(segments))
+  {
+  }
+
+  void print(int space_num);
+};
+
 class ASTNode
 {
 public:
@@ -87,7 +127,7 @@ public:
   std::vector<std::unique_ptr<Item>> items_;
 
   Crate() = default;
-  explicit Crate(std::vector<std::unique_ptr<Item>> items)
+  Crate(std::vector<std::unique_ptr<Item>> items)
       : items_(std::move(items))
   {
   }
@@ -181,10 +221,11 @@ class Expr : public ASTNode
 class LiteralExpr : public Expr
 {
 public:
+  bool is_int_;
   bool bool_value_;
   std::uint64_t int_value_;
   IntegerType int_type_;
-  bool is_int_;
+  
 
   LiteralExpr(bool is_int, bool bool_value, std::uint64_t int_value,
               IntegerType int_type)
@@ -205,6 +246,13 @@ public:
 class PathExpr : public Expr
 {
 public:
+  std::vector<PathSegment> path_;
+
+  explicit PathExpr(std::vector<PathSegment> path)
+      : path_(std::move(path))
+  {
+  }
+
   void print(int space_num) override;
 };
 
@@ -225,7 +273,7 @@ class BlockExpr : public Expr
 public:
   std::vector<std::unique_ptr<Stmt>> stmts_;
 
-  explicit BlockExpr(std::vector<std::unique_ptr<Stmt>> stmts)
+  BlockExpr(std::vector<std::unique_ptr<Stmt>> stmts)
       : stmts_(std::move(stmts))
   {
   }
@@ -371,23 +419,51 @@ class Type : public ASTNode
 class UnitType : public Type
 {
 public:
+  UnitType() = default;
+
   void print(int space_num) override;
 };
 
 class PathType : public Type
 {
 public:
+  std::vector<PathSegment> path_;
+
+  PathType(std::vector<PathSegment> path)
+      : path_(std::move(path))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class ReferenceType : public Type
 {
 public:
+  std::unique_ptr<Type> inner_type_;
+  bool mut_;
+  std::optional<std::string> lifetime_;
+
+  ReferenceType(std::unique_ptr<Type> inner_type, bool mut = false,
+                         std::optional<std::string> lifetime = std::nullopt)
+      : inner_type_(std::move(inner_type)), mut_(mut),
+        lifetime_(std::move(lifetime))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class ArrayType : public Type
 {
 public:
+  std::unique_ptr<Type> type_;
+  std::unique_ptr<Expr> const_value_;
+
+  ArrayType(std::unique_ptr<Type> type, std::unique_ptr<Expr> const_value)
+      : type_(std::move(type)), const_value_(std::move(const_value))
+  {
+  }
+
   void print(int space_num) override;
 };

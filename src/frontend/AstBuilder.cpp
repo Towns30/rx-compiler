@@ -4,9 +4,194 @@
 #include <utility>
 #include <vector>
 
+std::unique_ptr<PathExpr>
+AstBuilder::buildPathExpr(rx::RxParser::PathInExpressionContext *ctx)
+{
+  std::vector<PathSegment> path;
+  for (auto type_path_seg : ctx->pathExprSegment())
+  {
+    path.push_back(buildPathExprSegment(type_path_seg));
+  }
+  return std::make_unique<PathExpr>(std::move(path));
+}
+
+Path AstBuilder::buildExpressionPath(rx::RxParser::PathInExpressionContext *ctx)
+{
+  std::vector<PathSegment> path;
+  for (auto type_path_seg : ctx->pathExprSegment())
+  {
+    path.push_back(buildPathExprSegment(type_path_seg));
+  }
+  return Path(std::move(path));
+}
+
+PathSegment
+AstBuilder::buildPathExprSegment(rx::RxParser::PathExprSegmentContext *ctx)
+{
+  std::string name = ctx->pathIdentSegment()->getText();
+  if (ctx->genericArgs())
+  {
+    std::vector<GenericArg> generic_args;
+    for (auto generic_arg : ctx->genericArgs()->genericArg())
+    {
+      generic_args.push_back(buildGenericArg(generic_arg));
+    }
+    return PathSegment(name, std::move(generic_args));
+  }
+  return PathSegment(name, std::vector<GenericArg>{});
+}
+
 std::unique_ptr<Type> AstBuilder::buildType(rx::RxParser::TypeRefContext *ctx)
 {
-  throw std::logic_error("buildType 尚未实现");
+  if (ctx->typeRef())
+  {
+    return buildType(ctx->typeRef());
+  }
+  else if (ctx->LPAREN())
+  {
+    return std::make_unique<UnitType>();
+  }
+  else if (ctx->typePath())
+  {
+    return buildPathType(ctx->typePath());
+  }
+  else if (ctx->referenceType())
+  {
+    return buildReferenceType(ctx->referenceType());
+  }
+  else
+  {
+    return buildArrayType(ctx->arrayType());
+  }
+}
+
+std::unique_ptr<PathType>
+AstBuilder::buildPathType(rx::RxParser::TypePathContext *ctx)
+{
+  std::vector<PathSegment> path;
+  for (auto type_path_seg : ctx->typePathSegment())
+  {
+    path.push_back(buildTypePathSegment(type_path_seg));
+  }
+  return std::make_unique<PathType>(std::move(path));
+}
+
+std::unique_ptr<ReferenceType>
+AstBuilder::buildReferenceType(rx::RxParser::ReferenceTypeContext *ctx)
+{
+  std::optional<std::string> lifetime_arg = std::nullopt;
+  bool mut_arg = false;
+  if (ctx->lifetime())
+  {
+    lifetime_arg = ctx->lifetime()->getText();
+  }
+  if (ctx->MUT())
+  {
+    mut_arg = true;
+  }
+  if (ctx->AMP())
+  {
+    return std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg,
+                                           lifetime_arg);
+  }
+  else
+  {
+    return std::make_unique<ReferenceType>(
+        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg,
+                                        lifetime_arg),
+        false, std::nullopt);
+  }
+}
+
+std::unique_ptr<ArrayType>
+AstBuilder::buildArrayType(rx::RxParser::ArrayTypeContext *ctx)
+{
+  std::unique_ptr<Type> type_ptr = buildType(ctx->typeRef());
+  std::unique_ptr<Expr> const_value = buildConstValue(ctx->constValue());
+  return std::make_unique<ArrayType>(std::move(type_ptr),
+                                     std::move(const_value));
+}
+
+PathSegment
+AstBuilder::buildTypePathSegment(rx::RxParser::TypePathSegmentContext *ctx)
+{
+  std::string name = ctx->pathIdentSegment()->getText();
+  if (ctx->genericArgs())
+  {
+    std::vector<GenericArg> generic_args;
+    for (auto generic_arg : ctx->genericArgs()->genericArg())
+    {
+      generic_args.push_back(buildGenericArg(generic_arg));
+    }
+    return PathSegment(name, std::move(generic_args));
+  }
+  return PathSegment(name, std::vector<GenericArg>{});
+}
+
+GenericArg AstBuilder::buildGenericArg(rx::RxParser::GenericArgContext *ctx)
+{
+  if (ctx->lifetime())
+  {
+    return GenericArg(false, nullptr, ctx->lifetime()->getText());
+  }
+  else
+  {
+    return GenericArg(true, buildType(ctx->typeRef()), std::nullopt);
+  }
+}
+
+std::unique_ptr<Expr>
+AstBuilder::buildConstValue(rx::RxParser::ConstValueContext *ctx)
+{
+  if (ctx->INTEGER_LITERAL())
+  {
+    return std::make_unique<LiteralExpr>(
+        true, false,
+        LiteralStringToInt(ctx->INTEGER_LITERAL()->getText()),
+        LiteralStringToIntegerType(ctx->INTEGER_LITERAL()->getText()));
+  }
+  else if (ctx->TRUE())
+  {
+    return std::make_unique<LiteralExpr>(false, true, 0, IntegerType::Inferred);
+  }
+  else if (ctx->FALSE())
+  {
+    return std::make_unique<LiteralExpr>(false, false, 0,
+                                         IntegerType::Inferred);
+  }
+  else if (ctx->pathInExpression())
+  {
+    return buildPathExpr(ctx->pathInExpression());
+  }
+  else if (ctx->MINUS())
+  {
+    return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
+                                       buildMagnitude(ctx->magnitude()));
+  }
+  else
+  {
+    return buildConstValue(ctx->constValue());
+  }
+}
+
+std::unique_ptr<Expr>
+AstBuilder::buildMagnitude(rx::RxParser::MagnitudeContext *ctx)
+{
+  if (ctx->INTEGER_LITERAL())
+  {
+    return std::make_unique<LiteralExpr>(
+        true, false,
+        LiteralStringToInt(ctx->INTEGER_LITERAL()->getText()),
+        LiteralStringToIntegerType(ctx->INTEGER_LITERAL()->getText()));
+  }
+  else if (ctx->pathInExpression())
+  {
+    return buildPathExpr(ctx->pathInExpression());
+  }
+  else
+  {
+    return buildMagnitude(ctx->magnitude());
+  }
 }
 
 std::unique_ptr<Crate> AstBuilder::Build(rx::RxParser::CrateContext *ctx)
@@ -143,7 +328,6 @@ AstBuilder::getAssignOperator(rx::RxParser::AssignmentOperatorContext *ctx)
   {
     return AssignmentOperator::ShiftRightAssign;
   }
-  throw std::invalid_argument("Unknown assignment operator");
 }
 
 std::unique_ptr<Expr>

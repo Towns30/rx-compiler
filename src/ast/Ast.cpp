@@ -1,5 +1,56 @@
 #include "Ast.h"
 
+GenericArg::GenericArg(bool is_type, std::unique_ptr<Type> type,
+                       std::optional<std::string> life_time)
+    : is_type_(is_type), type_(std::move(type)),
+      life_time_(std::move(life_time))
+{
+}
+
+void GenericArg::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "GenericArg " << (is_type_ ? "type" : "lifetime") << '\n';
+  if (is_type_)
+  {
+    type_->print(space_num + 1);
+  }
+  else
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "Lifetime ";
+    if (life_time_)
+    {
+      std::cout << *life_time_;
+    }
+    else
+    {
+      std::cout << "(none)";
+    }
+    std::cout << '\n';
+  }
+}
+
+void PathSegment::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "PathSegment " << name_ << '\n';
+  for (auto &arg : generic_args_)
+  {
+    arg.print(space_num + 1);
+  }
+}
+
+void Path::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "Path" << (absolute_ ? " absolute" : "") << '\n';
+  for (auto &segment : segments_)
+  {
+    segment.print(space_num + 1);
+  }
+}
+
 void UseItem::print(int space_num) {}
 
 void ConstItem::print(int space_num) {}
@@ -12,7 +63,15 @@ void ExprStmt::print(int space_num) {}
 
 void UnitExpr::print(int space_num) {}
 
-void PathExpr::print(int space_num) {}
+void PathExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "PathExpr\n";
+  for (auto &segment : path_)
+  {
+    segment.print(space_num + 1);
+  }
+}
 
 void ArrayExpr::print(int space_num) {}
 
@@ -30,7 +89,12 @@ void ReturnExpr::print(int space_num) {}
 
 void ContinueExpr::print(int space_num) {}
 
-void UnaryExpr::print(int space_num) {}
+void UnaryExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "UnaryExpr " << op_ << '\n';
+  expr_->print(space_num + 1);
+}
 
 void AssignExpr::print(int space_num) {}
 
@@ -42,13 +106,49 @@ void IndexExpr::print(int space_num) {}
 
 void MemberExpr::print(int space_num) {}
 
-void UnitType::print(int space_num) {}
+void UnitType::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "UnitType\n";
+}
 
-void PathType::print(int space_num) {}
+void PathType::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "PathType\n";
+  for (auto &segment : path_)
+  {
+    segment.print(space_num + 1);
+  }
+}
 
-void ReferenceType::print(int space_num) {}
+void ReferenceType::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ReferenceType";
+  if (lifetime_)
+  {
+    std::cout << ' ' << *lifetime_;
+  }
+  if (mut_)
+  {
+    std::cout << " mut";
+  }
+  std::cout << '\n';
+  inner_type_->print(space_num + 1);
+}
 
-void ArrayType::print(int space_num) {}
+void ArrayType::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ArrayType\n";
+  PrintSpace(space_num + 1);
+  std::cout << "ElementType\n";
+  type_->print(space_num + 2);
+  PrintSpace(space_num + 1);
+  std::cout << "Length\n";
+  const_value_->print(space_num + 2);
+}
 
 std::ostream &operator<<(std::ostream &out, UnaryOperator op)
 {

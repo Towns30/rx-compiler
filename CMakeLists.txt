@@ -13,12 +13,14 @@ set(ANTLR_BUILD_STATIC ON CACHE BOOL "" FORCE)
 
 add_subdirectory(third_party/antlr4-cpp-runtime)
 
-add_executable(rx-parser 
+add_executable(rx-ast-builder 
     src/main.cpp
+    src/ast/Ast.cpp
+    src/frontend/AstBuilder.cpp
     generated/RxLexer.cpp
     generated/RxParser.cpp
 )
 
-target_include_directories(rx-parser PRIVATE generated)
+target_include_directories(rx-ast-builder PRIVATE generated)
 
-target_link_libraries(rx-parser PRIVATE antlr4_static)
+target_link_libraries(rx-ast-builder PRIVATE antlr4_static)
