@@ -1,0 +1,7 @@
+fn main() {
+    let signed: i32 = 1;
+    let unsigned: u32 = 2u32;
+    let signed_size: isize = 3isize;
+    let unsigned_size: usize = 4usize;
+    let flag: bool = true;
+}

@@ -1,0 +1,6 @@
+fn main() {
+    let unit: () = 0;
+    let parenthesized: (i32) = 1;
+    let nested_parentheses: (((i32))) = 2;
+    let parenthesized_unit: (()) = 0;
+}

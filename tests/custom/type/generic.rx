@@ -1,0 +1,11 @@
+fn main() {
+    let single: Vec<i32> = 0;
+    let multiple: Pair<i32, u32> = 0;
+    let lifetime: User<'a> = 0;
+    let mixed: Container<'a, i32, &'b mut u32> = 0;
+    let nested: Vec<Vec<i32>> = 0;
+    let per_segment: Outer<i32>::Inner<'a, u32> = 0;
+    let explicit_separator: Vec::<i32> = 0;
+    let trailing_comma: Pair<i32, u32,> = 0;
+    let empty_arguments: Marker<> = 0;
+}

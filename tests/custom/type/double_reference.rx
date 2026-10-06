@@ -1,0 +1,8 @@
+fn main() {
+    let double_shared: &&i32 = 0;
+    let inner_mutable: &&mut i32 = 0;
+    let inner_lifetime: &&'a mut i32 = 0;
+    let outer_mutable: &mut &i32 = 0;
+    let separate_lifetimes: &'a mut &'b i32 = 0;
+    let triple_shared: &&&i32 = 0;
+}

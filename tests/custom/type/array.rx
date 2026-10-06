@@ -1,0 +1,14 @@
+fn main() {
+    let fixed: [i32; 3] = 0;
+    let zero_length: [i32; 0] = 0;
+    let hex_length: [i32; 0x10] = 0;
+    let separated_digits: [i32; 1_024] = 0;
+    let suffixed_length: [i32; 3usize] = 0;
+    let constant_length: [i32; N] = 0;
+    let associated_length: [i32; Limits::SIZE] = 0;
+    let parentheses: [i32; ((3))] = 0;
+    let negative_literal: [i32; -3] = 0;
+    let negative_path: [i32; -(Limits::SIZE)] = 0;
+    let boolean_length: [i32; true] = 0;
+    let nested_array: [[i32; 2]; 3] = 0;
+}

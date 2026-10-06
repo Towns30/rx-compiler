@@ -1,0 +1,6 @@
+fn main() {
+    let named: Point = 0;
+    let associated: Outer::Inner = 0;
+    let multiple_segments: A::B::C = 0;
+    let self_type: Self = 0;
+}

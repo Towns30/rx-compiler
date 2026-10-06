@@ -1,0 +1,6 @@
+fn main() {
+    let reference_array: &'a mut [Vec<&'b i32>; Limits::SIZE] = 0;
+    let array_of_references: [&'a mut Vec<i32>; 2] = 0;
+    let array_argument: Container<[i32; 3], ()> = 0;
+    let double_array_reference: &&'a mut [[u32; 2]; 3] = 0;
+}

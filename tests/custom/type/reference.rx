@@ -1,0 +1,8 @@
+fn main() {
+    let shared: &i32 = 0;
+    let mutable: &mut i32 = 0;
+    let named_lifetime: &'a i32 = 0;
+    let mutable_lifetime: &'a mut i32 = 0;
+    let array_reference: &[i32; 3] = 0;
+    let generic_reference: &Vec<i32> = 0;
+}
