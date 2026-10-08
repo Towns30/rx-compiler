@@ -75,6 +75,30 @@ class BlockExpr;
 class Type;
 class ConstItem;
 
+struct FuncParam
+{
+  std::string ident_;
+  bool mut_;
+  std::unique_ptr<Type> type_;
+
+  FuncParam(std::string ident, bool mut, std::unique_ptr<Type> type);
+
+  void print(int space_num);
+};
+
+struct SelfParam
+{
+  bool is_reference_;
+  bool mut_;
+
+  SelfParam(bool is_reference, bool mut)
+      : is_reference_(is_reference), mut_(mut)
+  {
+  }
+
+  void print(int space_num);
+};
+
 struct GenericArg
 {
   bool is_type_;
@@ -140,20 +164,21 @@ class Item : public ASTNode
 {
 };
 
-class UseItem : public Item
-{
-public:
-  void print(int space_num) override;
-};
-
 class FuncItem : public Item
 {
 public:
   std::string ident_;
+  std::optional<SelfParam> self_param_;
+  std::vector<FuncParam> func_params_;
+  std::unique_ptr<Type> return_type_;
   std::unique_ptr<BlockExpr> block_expr_;
 
-  FuncItem(std::string ident, std::unique_ptr<BlockExpr> block_expr)
-      : ident_(std::move(ident)), block_expr_(std::move(block_expr))
+  FuncItem(std::string ident, std::optional<SelfParam> self_param,
+           std::vector<FuncParam> func_params, std::unique_ptr<Type> return_type,
+           std::unique_ptr<BlockExpr> block_expr)
+      : ident_(std::move(ident)), self_param_(std::move(self_param)),
+        func_params_(std::move(func_params)), return_type_(std::move(return_type)),
+        block_expr_(std::move(block_expr))
   {
   }
 
@@ -337,8 +362,7 @@ public:
          std::unique_ptr<IfExpr> else_if_expr = nullptr)
       : condition_expr_(std::move(condition_expr)),
         block_expr_(std::move(block_expr)), has_else_(has_else),
-        is_else_if_(is_else_if),
-        else_block_expr_(std::move(else_block_expr)),
+        is_else_if_(is_else_if), else_block_expr_(std::move(else_block_expr)),
         else_if_expr_(std::move(else_if_expr))
   {
   }
@@ -349,7 +373,7 @@ public:
 class LoopExpr : public Expr
 {
 public:
-  std::unique_ptr<BlockExpr> block_expr_;  
+  std::unique_ptr<BlockExpr> block_expr_;
 
   explicit LoopExpr(std::unique_ptr<BlockExpr> block_expr)
       : block_expr_(std::move(block_expr))

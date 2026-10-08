@@ -245,12 +245,64 @@ void Crate::print(int space_num)
   }
 }
 
+FuncParam::FuncParam(std::string ident, bool mut, std::unique_ptr<Type> type)
+    : ident_(std::move(ident)), mut_(mut), type_(std::move(type))
+{
+}
+
+void FuncParam::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "FuncParam\n";
+  PrintSpace(space_num + 1);
+  std::cout << ident_ << '\n';
+  if (mut_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "mutable\n";
+  }
+  if (type_)
+  {
+    type_->print(space_num + 1);
+  }
+}
+
+void SelfParam::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "SelfParam\n";
+  PrintSpace(space_num + 1);
+  if (is_reference_)
+  {
+    std::cout << '&';
+  }
+  if (mut_)
+  {
+    std::cout << "mut ";
+  }
+  std::cout << "self\n";
+}
+
 void FuncItem::print(int space_num)
 {
   PrintSpace(space_num);
   std::cout << "FuncItem\n";
   PrintSpace(space_num + 1);
   std::cout << ident_ << '\n';
+  if (self_param_)
+  {
+    self_param_->print(space_num + 1);
+  }
+  for (auto &param : func_params_)
+  {
+    param.print(space_num + 1);
+  }
+  if (return_type_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "ReturnType\n";
+    return_type_->print(space_num + 2);
+  }
   block_expr_->print(space_num + 1);
 }
 

@@ -18,8 +18,16 @@ private:
   std::unique_ptr<Item> buildItem(rx::RxParser::ItemContext *ctx);
   std::unique_ptr<Stmt> buildStmt(rx::RxParser::StatementContext *ctx);
   std::unique_ptr<Expr> buildExpr(rx::RxParser::ExpressionContext *ctx);
+  FuncParam getFuncParam(rx::RxParser::FunctionParamContext *ctx);
+  SelfParam getSelfParam(rx::RxParser::SelfParamContext *ctx);
   std::unique_ptr<FuncItem>
   buildFuncItem(rx::RxParser::FunctionDefinitionContext *ctx);
+  std::unique_ptr<StructItem>
+  buildStructItem(rx::RxParser::StructDefinitionContext *ctx);
+  std::unique_ptr<ConstItem>
+  buildConstItem(rx::RxParser::ConstantItemContext *ctx);
+  std::unique_ptr<ImplItem>
+  buildImplItem(rx::RxParser::InherentImplContext *ctx);
   std::unique_ptr<BlockExpr>
   buildBlockExpr(rx::RxParser::BlockExpressionContext *ctx);
   std::unique_ptr<LetStmt> buildLetStmt(rx::RxParser::LetStatementContext *ctx);

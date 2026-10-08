@@ -203,7 +203,8 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
     }
     else
     {
-    return buildType(ctx->typeRef());}
+      return buildType(ctx->typeRef());
+    }
   }
   else if (ctx->arrayType())
   {
@@ -266,7 +267,10 @@ std::unique_ptr<Crate> AstBuilder::buildCrate(rx::RxParser::CrateContext *ctx)
   items.reserve(ctx->item().size());
   for (auto *ctx_item : ctx->item())
   {
-    items.push_back(std::move(buildItem(ctx_item)));
+    if (buildItem(ctx_item))
+    {
+      items.push_back(std::move(buildItem(ctx_item)));
+    }
   }
   return std::make_unique<Crate>(std::move(items));
 }
@@ -277,7 +281,42 @@ std::unique_ptr<Item> AstBuilder::buildItem(rx::RxParser::ItemContext *ctx)
   {
     return buildFuncItem(ctx->functionDefinition());
   }
-  // to be continue
+  else if (ctx->constantItem())
+  {
+    return buildConstItem(ctx->constantItem());
+  }
+  else if (ctx->inherentImpl())
+  {
+    return buildImplItem(ctx->inherentImpl());
+  }
+  else if (ctx->structDefinition())
+  {
+    return buildStructItem(ctx->structDefinition());
+  }
+  else
+  {
+    return nullptr;
+  }
+}
+
+FuncParam AstBuilder::getFuncParam(rx::RxParser::FunctionParamContext *ctx)
+{
+  if (ctx->identifierBinding()->MUT())
+
+  {
+    return FuncParam(ctx->identifierBinding()->identifier()->getText(), true,
+                     buildType(ctx->typeRef()));
+  }
+  else
+  {
+    return FuncParam(ctx->identifierBinding()->identifier()->getText(), false,
+                     buildType(ctx->typeRef()));
+  }
+}
+
+SelfParam AstBuilder::getSelfParam(rx::RxParser::SelfParamContext *ctx)
+{
+  return SelfParam(bool(ctx->AMP()), bool(ctx->MUT()));
 }
 
 std::unique_ptr<FuncItem>
@@ -286,7 +325,43 @@ AstBuilder::buildFuncItem(rx::RxParser::FunctionDefinitionContext *ctx)
   std::string ident = ctx->identifier()->getText();
   std::unique_ptr<BlockExpr> block_expr =
       std::move(buildBlockExpr(ctx->blockExpression()));
-  return std::make_unique<FuncItem>(std::move(ident), std::move(block_expr));
+  std::optional<SelfParam> self_param = std::nullopt;
+  std::vector<FuncParam> func_params;
+  std::unique_ptr<Type> return_type;
+  if (ctx->functionParameters())
+  {
+    for (auto func_param_ctx : ctx->functionParameters()->functionParam())
+    {
+      func_params.push_back(getFuncParam(func_param_ctx));
+    }
+    if (ctx->functionParameters()->selfParam())
+    {
+      self_param = getSelfParam(ctx->functionParameters()->selfParam());
+    }
+  }
+  if (ctx->typeRef())
+  {
+    return_type = buildType(ctx->typeRef());
+  }
+  return std::make_unique<FuncItem>(ident, self_param, func_params, return_type,
+                                    block_expr);
+}
+
+std::unique_ptr<StructItem>
+AstBuilder::buildStructItem(rx::RxParser::StructDefinitionContext *ctx)
+{
+  
+}
+std::unique_ptr<ConstItem>
+AstBuilder::buildConstItem(rx::RxParser::ConstantItemContext *ctx)
+{
+  return std::make_unique<ConstItem>(ctx->identifier()->getText(),
+                                     buildType(ctx->typeRef()),
+                                     buildConstValue(ctx->constValue()));
+}
+std::unique_ptr<ImplItem>
+AstBuilder::buildImplItem(rx::RxParser::InherentImplContext *ctx)
+{
 }
 
 std::unique_ptr<BlockExpr>
@@ -295,15 +370,20 @@ AstBuilder::buildBlockExpr(rx::RxParser::BlockExpressionContext *ctx)
   std::vector<rx::RxParser::StatementContext *> stmt_ctxs = ctx->statement();
   auto expr_stmt_ctx = ctx->statementExpression();
   std::vector<std::unique_ptr<Stmt>> stmts;
+  std::unique_ptr<Expr> tail_stmt;
   for (auto &stmt_ctx : stmt_ctxs)
   {
-    stmts.push_back(std::move(buildStmt(stmt_ctx)));
+    auto stmt = buildStmt(stmt_ctx);
+    if (stmt)
+    {
+      stmts.push_back(std::move(stmt));
+    }
   }
   if (expr_stmt_ctx)
   {
-    stmts.push_back(std::move(buildExprStmt(expr_stmt_ctx)));
+    tail_stmt = std::move(buildStmtExpr(ctx->statementExpression()));
   }
-  return std::make_unique<BlockExpr>(std::move(stmts));
+  return std::make_unique<BlockExpr>(std::move(stmts), tail_stmt);
 }
 
 std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
@@ -314,11 +394,13 @@ std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
   }
   else if (ctx->expressionWithBlock())
   {
-    return std::make_unique<ExprStmt>(buildExprWithBlock(ctx->expressionWithBlock()));
+    return std::make_unique<ExprStmt>(
+        buildExprWithBlock(ctx->expressionWithBlock()));
   }
   else if (ctx->statementExpression())
   {
-    return std::make_unique<ExprStmt>(buildStmtExpr(ctx->statementExpression()));
+    return std::make_unique<ExprStmt>(
+        buildStmtExpr(ctx->statementExpression()));
   }
   return nullptr;
 }
@@ -347,6 +429,7 @@ AstBuilder::buildExpr(rx::RxParser::ExpressionContext *ctx)
 std::unique_ptr<ExprStmt>
 AstBuilder::buildExprStmt(rx::RxParser::StatementExpressionContext *ctx)
 {
+  return std::make_unique<ExprStmt>(buildStmtExpr(ctx));
 }
 AssignmentOperator
 AstBuilder::getAssignOperator(rx::RxParser::AssignmentOperatorContext *ctx)
@@ -1665,7 +1748,8 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakCompExpr(
   {
     return std::make_unique<BinaryExpr>(
         BinaryOperator::Less,
-        buildConditionBreakBitOrExpr(ctx->conditionBreakClosedBitOrExpression()),
+        buildConditionBreakBitOrExpr(
+            ctx->conditionBreakClosedBitOrExpression()),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()));
   }
   if (ctx->comparisonExceptLt())
@@ -1981,8 +2065,8 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakAddExpr(
     return buildConditionBreakMultExpr(
         ctx->conditionBreakClosedMultiplicativeExpression());
   }
-  std::unique_ptr<Expr> result_expr =
-      buildConditionBreakMultExpr(ctx->conditionBreakMultiplicativeExpression());
+  std::unique_ptr<Expr> result_expr = buildConditionBreakMultExpr(
+      ctx->conditionBreakMultiplicativeExpression());
   for (int i = 0; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i]);
