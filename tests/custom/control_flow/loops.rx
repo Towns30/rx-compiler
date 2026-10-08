@@ -1,0 +1,16 @@
+fn early_exit(value: i32) {
+    if value == 0 { return; }
+}
+fn main() {
+    let mut index = 0;
+    while index < 4 {
+        index += 1;
+        if index == 2 { continue; }
+        if index == 3 { break; }
+    }
+    let answer = loop {
+        if index > 0 { break index; }
+        index += 1;
+    };
+    early_exit(answer);
+}

@@ -1,0 +1,23 @@
+fn main() {
+    let mut value: i32 = 8;
+    value = 9;
+    value += 1;
+    value -= 1;
+    value *= 2;
+    value /= 2;
+    value %= 7;
+    value &= 3;
+    value |= 8;
+    value ^= 2;
+    value <<= 1;
+    value >>= 1;
+    let arithmetic = 1 + 2 * 3 - 4 / 2 % 2;
+    let shifted = (value << 2) >> 1;
+    let bits = value | 2 ^ 3 & 1;
+    let comparison = value >= 0 && value != 1 || value <= 5;
+    let equality = value == 2;
+    let negated = -value;
+    let inverted = !comparison;
+    let reference = &mut value;
+    let copied = *reference;
+}

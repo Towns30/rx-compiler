@@ -1,0 +1,15 @@
+fn choose(value: i32) -> i32 {
+    if value > 0 {
+        { value + 1 }
+    } else if value == 0 {
+        0
+    } else {
+        -value
+    }
+}
+fn main() {
+    ;
+    let value = { let base = 2; base * 3 };
+    { let temporary = 1; }
+    let result = choose(value);
+}

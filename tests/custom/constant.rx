@@ -1,5 +1,0 @@
-const ANSWER: i32 = 42;
-const ENABLED: bool = true;
-
-fn main() {
-}

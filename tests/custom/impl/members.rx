@@ -1,0 +1,19 @@
+struct Counter { value: i32 }
+impl Counter {
+    const STEP: i32 = 1;
+    fn new(value: i32) -> Self { Self { value: value } }
+    fn read(&self) -> i32 { self.value }
+    fn increment(&mut self) { self.value += Self::STEP; }
+    fn consume(self) -> i32 { self.value }
+    fn reset(mut self) -> Self {
+        self.value = 0;
+        self
+    }
+}
+fn main() {
+    let mut counter = Counter::new(2);
+    counter.increment();
+    let value = counter.read();
+    let reset = counter.reset();
+    let consumed = reset.consume();
+}

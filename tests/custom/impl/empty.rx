@@ -1,0 +1,3 @@
+struct Empty {}
+impl Empty {}
+fn main() { let empty = Empty {}; }

@@ -1,0 +1,13 @@
+struct Buffer { values: [i32; 3] }
+impl Buffer {
+    fn new() -> Self { Self { values: [1, 2, 3] } }
+    fn first(&self) -> i32 { self.values[0] }
+}
+fn main() {
+    let empty: [i32; 0] = [];
+    let repeated = [7; 3];
+    let values = [1, 2, 3,];
+    let first = Buffer::new().first();
+    let second = Buffer::new().values[1];
+    let converted = values[0] as u32;
+}

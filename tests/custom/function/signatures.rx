@@ -1,0 +1,13 @@
+fn empty() {}
+fn unit() -> () { () }
+fn add(mut left: i32, right: i32,) -> i32 {
+    left += right;
+    left
+}
+fn identity(value: &mut i32) -> &mut i32 { value }
+fn main() {
+    let mut value: i32 = add(1, 2,);
+    let reference = identity(&mut value);
+    empty();
+    unit();
+}
