@@ -67,13 +67,33 @@ void PathExpr::print(int space_num)
 {
   PrintSpace(space_num);
   std::cout << "PathExpr\n";
-  for (auto &segment : path_)
+  for (auto &segment : path_segments_)
   {
     segment.print(space_num + 1);
   }
 }
 
-void ArrayExpr::print(int space_num) {}
+void ArrayExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ArrayExpr" << (is_repeat_ ? " repeat" : "") << '\n';
+  if (is_repeat_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "Element\n";
+    repeat_expr_->print(space_num + 2);
+    PrintSpace(space_num + 1);
+    std::cout << "Count\n";
+    repeat_count_->print(space_num + 2);
+  }
+  else
+  {
+    for (auto &expr : exprs_)
+    {
+      expr->print(space_num + 1);
+    }
+  }
+}
 
 void StructExpr::print(int space_num) {}
 
@@ -106,6 +126,8 @@ void IndexExpr::print(int space_num) {}
 
 void MemberExpr::print(int space_num) {}
 
+void MethodCallExpr::print(int space_num) {}
+
 void UnitType::print(int space_num)
 {
   PrintSpace(space_num);
@@ -116,7 +138,7 @@ void PathType::print(int space_num)
 {
   PrintSpace(space_num);
   std::cout << "PathType\n";
-  for (auto &segment : path_)
+  for (auto &segment : path_segments_)
   {
     segment.print(space_num + 1);
   }

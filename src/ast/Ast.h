@@ -92,8 +92,7 @@ struct PathSegment
   std::string name_; // Vec、new、self、Self
   std::vector<GenericArg> generic_args_;
 
-  PathSegment(std::string name,
-                       std::vector<GenericArg> generic_args = {})
+  PathSegment(std::string name, std::vector<GenericArg> generic_args = {})
       : name_(std::move(name)), generic_args_(std::move(generic_args))
   {
   }
@@ -127,10 +126,7 @@ public:
   std::vector<std::unique_ptr<Item>> items_;
 
   Crate() = default;
-  Crate(std::vector<std::unique_ptr<Item>> items)
-      : items_(std::move(items))
-  {
-  }
+  Crate(std::vector<std::unique_ptr<Item>> items) : items_(std::move(items)) {}
 
   Crate(const Crate &) = delete;
   Crate &operator=(const Crate &) = delete;
@@ -211,6 +207,10 @@ public:
 class ExprStmt : public Stmt
 {
 public:
+  std::unique_ptr<Expr> expr_;
+
+  ExprStmt(std::unique_ptr<Expr> expr) : expr_(std::move(expr)) {}
+
   void print(int space_num) override;
 };
 
@@ -225,7 +225,6 @@ public:
   bool bool_value_;
   std::uint64_t int_value_;
   IntegerType int_type_;
-  
 
   LiteralExpr(bool is_int, bool bool_value, std::uint64_t int_value,
               IntegerType int_type)
@@ -246,10 +245,10 @@ public:
 class PathExpr : public Expr
 {
 public:
-  std::vector<PathSegment> path_;
+  std::vector<PathSegment> path_segments_;
 
-  explicit PathExpr(std::vector<PathSegment> path)
-      : path_(std::move(path))
+  PathExpr(std::vector<PathSegment> path_segments)
+      : path_segments_(std::move(path_segments))
   {
   }
 
@@ -259,12 +258,50 @@ public:
 class ArrayExpr : public Expr
 {
 public:
+  bool is_repeat_;
+  std::vector<std::unique_ptr<Expr>> exprs_;
+  std::unique_ptr<Expr> repeat_expr_;
+  std::unique_ptr<Expr> repeat_count_;
+
+  ArrayExpr(std::vector<std::unique_ptr<Expr>> exprs)
+      : is_repeat_(false), exprs_(std::move(exprs))
+  {
+  }
+
+  ArrayExpr(std::unique_ptr<Expr> repeat_expr,
+            std::unique_ptr<Expr> repeat_count)
+      : is_repeat_(true), repeat_expr_(std::move(repeat_expr)),
+        repeat_count_(std::move(repeat_count))
+  {
+  }
+
   void print(int space_num) override;
+};
+
+class StructField
+{
+public:
+  std::string name_;
+  std::unique_ptr<Expr> expr_;
+
+  StructField(std::string name, std::unique_ptr<Expr> expr)
+      : name_(std::move(name)), expr_(std::move(expr))
+  {
+  }
 };
 
 class StructExpr : public Expr
 {
 public:
+  std::unique_ptr<PathExpr> path_;
+  std::vector<StructField> struct_fields_;
+
+  StructExpr(std::unique_ptr<PathExpr> path,
+             std::vector<StructField> struct_fields)
+      : path_(std::move(path)), struct_fields_(std::move(struct_fields))
+  {
+  }
+
   void print(int space_num) override;
 };
 
@@ -272,9 +309,11 @@ class BlockExpr : public Expr
 {
 public:
   std::vector<std::unique_ptr<Stmt>> stmts_;
+  std::unique_ptr<Expr> tail_expr_;
 
-  BlockExpr(std::vector<std::unique_ptr<Stmt>> stmts)
-      : stmts_(std::move(stmts))
+  BlockExpr(std::vector<std::unique_ptr<Stmt>> stmts,
+            std::unique_ptr<Expr> tail_expr)
+      : stmts_(std::move(stmts)), tail_expr_(std::move(tail_expr))
   {
   }
 
@@ -284,30 +323,81 @@ public:
 class IfExpr : public Expr
 {
 public:
+  std::unique_ptr<Expr> condition_expr_;
+  std::unique_ptr<BlockExpr> block_expr_;
+  bool has_else_;
+  bool is_else_if_;
+  std::unique_ptr<BlockExpr> else_block_expr_;
+  std::unique_ptr<IfExpr> else_if_expr_;
+
+  IfExpr(std::unique_ptr<Expr> condition_expr,
+         std::unique_ptr<BlockExpr> block_expr, bool has_else = false,
+         bool is_else_if = false,
+         std::unique_ptr<BlockExpr> else_block_expr = nullptr,
+         std::unique_ptr<IfExpr> else_if_expr = nullptr)
+      : condition_expr_(std::move(condition_expr)),
+        block_expr_(std::move(block_expr)), has_else_(has_else),
+        is_else_if_(is_else_if),
+        else_block_expr_(std::move(else_block_expr)),
+        else_if_expr_(std::move(else_if_expr))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class LoopExpr : public Expr
 {
 public:
+  std::unique_ptr<BlockExpr> block_expr_;  
+
+  explicit LoopExpr(std::unique_ptr<BlockExpr> block_expr)
+      : block_expr_(std::move(block_expr))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class WhileExpr : public Expr
 {
 public:
+  std::unique_ptr<Expr> condition_expr_;
+  std::unique_ptr<BlockExpr> block_expr_;
+
+  WhileExpr(std::unique_ptr<Expr> condition_expr,
+            std::unique_ptr<BlockExpr> block_expr)
+      : condition_expr_(std::move(condition_expr)),
+        block_expr_(std::move(block_expr))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class BreakExpr : public Expr
 {
 public:
+  std::unique_ptr<Expr> value_;
+
+  explicit BreakExpr(std::unique_ptr<Expr> value = nullptr)
+      : value_(std::move(value))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class ReturnExpr : public Expr
 {
 public:
+  std::unique_ptr<Expr> value_;
+
+  explicit ReturnExpr(std::unique_ptr<Expr> value = nullptr)
+      : value_(std::move(value))
+  {
+  }
+
   void print(int space_num) override;
 };
 
@@ -366,6 +456,14 @@ public:
 class CastExpr : public Expr
 {
 public:
+  std::unique_ptr<Expr> expr_;
+  std::unique_ptr<Type> type_;
+
+  CastExpr(std::unique_ptr<Expr> expr, std::unique_ptr<Type> type)
+      : expr_(std::move(expr)), type_(std::move(type))
+  {
+  }
+
   void print(int space_num) override;
 };
 
@@ -412,6 +510,23 @@ public:
   void print(int space_num) override;
 };
 
+class MethodCallExpr : public Expr
+{
+public:
+  std::unique_ptr<Expr> base_;
+  PathSegment method_;
+  std::vector<std::unique_ptr<Expr>> arguments_;
+
+  MethodCallExpr(std::unique_ptr<Expr> base, PathSegment method,
+                 std::vector<std::unique_ptr<Expr>> arguments)
+      : base_(std::move(base)), method_(std::move(method)),
+        arguments_(std::move(arguments))
+  {
+  }
+
+  void print(int space_num) override;
+};
+
 class Type : public ASTNode
 {
 };
@@ -427,10 +542,10 @@ public:
 class PathType : public Type
 {
 public:
-  std::vector<PathSegment> path_;
+  std::vector<PathSegment> path_segments_;
 
-  PathType(std::vector<PathSegment> path)
-      : path_(std::move(path))
+  PathType(std::vector<PathSegment> path_segments)
+      : path_segments_(std::move(path_segments))
   {
   }
 
@@ -445,7 +560,7 @@ public:
   std::optional<std::string> lifetime_;
 
   ReferenceType(std::unique_ptr<Type> inner_type, bool mut = false,
-                         std::optional<std::string> lifetime = std::nullopt)
+                std::optional<std::string> lifetime = std::nullopt)
       : inner_type_(std::move(inner_type)), mut_(mut),
         lifetime_(std::move(lifetime))
   {
