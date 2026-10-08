@@ -1,34 +1,15 @@
 #include "Ast.h"
 
-GenericArg::GenericArg(bool is_type, std::unique_ptr<Type> type,
-                       std::optional<std::string> life_time)
-    : is_type_(is_type), type_(std::move(type)),
-      life_time_(std::move(life_time))
+GenericArg::GenericArg(std::unique_ptr<Type> type)
+    : type_(std::move(type))
 {
 }
 
 void GenericArg::print(int space_num)
 {
   PrintSpace(space_num);
-  std::cout << "GenericArg " << (is_type_ ? "type" : "lifetime") << '\n';
-  if (is_type_)
-  {
-    type_->print(space_num + 1);
-  }
-  else
-  {
-    PrintSpace(space_num + 1);
-    std::cout << "Lifetime ";
-    if (life_time_)
-    {
-      std::cout << *life_time_;
-    }
-    else
-    {
-      std::cout << "(none)";
-    }
-    std::cout << '\n';
-  }
+  std::cout << "GenericArg type\n";
+  type_->print(space_num + 1);
 }
 
 void PathSegment::print(int space_num)
@@ -51,17 +32,78 @@ void Path::print(int space_num)
   }
 }
 
-void UseItem::print(int space_num) {}
+void ConstItem::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ConstItem\n";
+  PrintSpace(space_num + 1);
+  std::cout << ident_ << '\n';
+  type_->print(space_num + 1);
+  const_value_->print(space_num + 1);
+}
 
-void ConstItem::print(int space_num) {}
+void ImplItem::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ImplItem\n";
+  type_->print(space_num + 1);
+  for (const auto &item : items_)
+  {
+    item->print(space_num + 1);
+  }
+}
 
-void ImplItem::print(int space_num) {}
+StructField::StructField(std::string ident, std::unique_ptr<Type> type)
+    : ident_(std::move(ident)), type_(std::move(type))
+{
+}
 
-void StructItem::print(int space_num) {}
+void StructField::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "StructField\n";
+  PrintSpace(space_num + 1);
+  std::cout << ident_ << '\n';
+  type_->print(space_num + 1);
+}
 
-void ExprStmt::print(int space_num) {}
+void StructItem::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "StructItem\n";
+  PrintSpace(space_num + 1);
+  std::cout << ident_ << '\n';
+  for (auto derive : derives_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "Derive ";
+    switch (derive)
+    {
+    case DeriveKind::Copy: std::cout << "Copy"; break;
+    case DeriveKind::Clone: std::cout << "Clone"; break;
+    case DeriveKind::PartialEq: std::cout << "PartialEq"; break;
+    case DeriveKind::Eq: std::cout << "Eq"; break;
+    }
+    std::cout << '\n';
+  }
+  for (auto &field : fields_)
+  {
+    field.print(space_num + 1);
+  }
+}
 
-void UnitExpr::print(int space_num) {}
+void ExprStmt::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ExprStmt\n";
+  expr_->print(space_num + 1);
+}
+
+void UnitExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "UnitExpr\n";
+}
 
 void PathExpr::print(int space_num)
 {
@@ -95,19 +137,86 @@ void ArrayExpr::print(int space_num)
   }
 }
 
-void StructExpr::print(int space_num) {}
+void StructExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "StructExpr\n";
+  path_->print(space_num + 1);
+  for (auto &field : struct_fields_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "StructExprField " << field.name_ << '\n';
+    field.expr_->print(space_num + 2);
+  }
+}
 
-void IfExpr::print(int space_num) {}
+void IfExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "IfExpr\n";
+  PrintSpace(space_num + 1);
+  std::cout << "Condition\n";
+  condition_expr_->print(space_num + 2);
+  PrintSpace(space_num + 1);
+  std::cout << "Then\n";
+  block_expr_->print(space_num + 2);
+  if (has_else_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "Else\n";
+    if (is_else_if_)
+    {
+      else_if_expr_->print(space_num + 2);
+    }
+    else
+    {
+      else_block_expr_->print(space_num + 2);
+    }
+  }
+}
 
-void LoopExpr::print(int space_num) {}
+void LoopExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "LoopExpr\n";
+  block_expr_->print(space_num + 1);
+}
 
-void WhileExpr::print(int space_num) {}
+void WhileExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "WhileExpr\n";
+  PrintSpace(space_num + 1);
+  std::cout << "Condition\n";
+  condition_expr_->print(space_num + 2);
+  block_expr_->print(space_num + 1);
+}
 
-void BreakExpr::print(int space_num) {}
+void BreakExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "BreakExpr\n";
+  if (value_)
+  {
+    value_->print(space_num + 1);
+  }
+}
 
-void ReturnExpr::print(int space_num) {}
+void ReturnExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ReturnExpr\n";
+  if (value_)
+  {
+    value_->print(space_num + 1);
+  }
+}
 
-void ContinueExpr::print(int space_num) {}
+void ContinueExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "ContinueExpr\n";
+}
 
 void UnaryExpr::print(int space_num)
 {
@@ -116,17 +225,76 @@ void UnaryExpr::print(int space_num)
   expr_->print(space_num + 1);
 }
 
-void AssignExpr::print(int space_num) {}
+void AssignExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "AssignExpr ";
+  switch (op_)
+  {
+  case AssignmentOperator::Assign: std::cout << "="; break;
+  case AssignmentOperator::AddAssign: std::cout << "+="; break;
+  case AssignmentOperator::SubtractAssign: std::cout << "-="; break;
+  case AssignmentOperator::MultiplyAssign: std::cout << "*="; break;
+  case AssignmentOperator::DivideAssign: std::cout << "/="; break;
+  case AssignmentOperator::RemainderAssign: std::cout << "%="; break;
+  case AssignmentOperator::BitAndAssign: std::cout << "&="; break;
+  case AssignmentOperator::BitOrAssign: std::cout << "|="; break;
+  case AssignmentOperator::BitXorAssign: std::cout << "^="; break;
+  case AssignmentOperator::ShiftLeftAssign: std::cout << "<<="; break;
+  case AssignmentOperator::ShiftRightAssign: std::cout << ">>="; break;
+  }
+  std::cout << '\n';
+  lhs_->print(space_num + 1);
+  rhs_->print(space_num + 1);
+}
 
-void CastExpr::print(int space_num) {}
+void CastExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "CastExpr\n";
+  expr_->print(space_num + 1);
+  type_->print(space_num + 1);
+}
 
-void CallExpr::print(int space_num) {}
+void CallExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "CallExpr\n";
+  callee_->print(space_num + 1);
+  for (auto &argument : arguments_)
+  {
+    argument->print(space_num + 1);
+  }
+}
 
-void IndexExpr::print(int space_num) {}
+void IndexExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "IndexExpr\n";
+  base_->print(space_num + 1);
+  index_->print(space_num + 1);
+}
 
-void MemberExpr::print(int space_num) {}
+void MemberExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "MemberExpr\n";
+  base_->print(space_num + 1);
+  PrintSpace(space_num + 1);
+  std::cout << member_ << '\n';
+}
 
-void MethodCallExpr::print(int space_num) {}
+void MethodCallExpr::print(int space_num)
+{
+  PrintSpace(space_num);
+  std::cout << "MethodCallExpr\n";
+  base_->print(space_num + 1);
+  method_.print(space_num + 1);
+  for (auto &argument : arguments_)
+  {
+    argument->print(space_num + 1);
+  }
+}
 
 void UnitType::print(int space_num)
 {
@@ -148,10 +316,6 @@ void ReferenceType::print(int space_num)
 {
   PrintSpace(space_num);
   std::cout << "ReferenceType";
-  if (lifetime_)
-  {
-    std::cout << ' ' << *lifetime_;
-  }
   if (mut_)
   {
     std::cout << " mut";
@@ -314,6 +478,12 @@ void BlockExpr::print(int space_num)
   {
     stmt->print(space_num + 1);
   }
+  if (tail_expr_)
+  {
+    PrintSpace(space_num + 1);
+    std::cout << "TailExpr\n";
+    tail_expr_->print(space_num + 2);
+  }
 }
 
 void LetStmt::print(int space_num)
@@ -345,7 +515,7 @@ void BinaryExpr::print(int space_num)
 void LiteralExpr::print(int space_num)
 {
   PrintSpace(space_num);
-  std::cout << "LieralExpr\n";
+  std::cout << "LiteralExpr\n";
   PrintSpace(space_num + 1);
   if (is_int_)
   {

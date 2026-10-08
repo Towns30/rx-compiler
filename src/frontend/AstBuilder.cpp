@@ -34,7 +34,10 @@ AstBuilder::buildPathExprSegment(rx::RxParser::PathExprSegmentContext *ctx)
     std::vector<GenericArg> generic_args;
     for (auto generic_arg : ctx->genericArgs()->genericArg())
     {
-      generic_args.push_back(buildGenericArg(generic_arg));
+      if (generic_arg->typeRef())
+      {
+        generic_args.push_back(buildGenericArg(generic_arg));
+      }
     }
     return PathSegment(name, std::move(generic_args));
   }
@@ -79,27 +82,20 @@ AstBuilder::buildPathType(rx::RxParser::TypePathContext *ctx)
 std::unique_ptr<ReferenceType>
 AstBuilder::buildReferenceType(rx::RxParser::ReferenceTypeContext *ctx)
 {
-  std::optional<std::string> lifetime_arg = std::nullopt;
   bool mut_arg = false;
-  if (ctx->lifetime())
-  {
-    lifetime_arg = ctx->lifetime()->getText();
-  }
   if (ctx->MUT())
   {
     mut_arg = true;
   }
   if (ctx->AMP())
   {
-    return std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg,
-                                           lifetime_arg);
+    return std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg);
   }
   else
   {
     return std::make_unique<ReferenceType>(
-        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg,
-                                        lifetime_arg),
-        false, std::nullopt);
+        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg),
+        false);
   }
 }
 
@@ -121,7 +117,10 @@ AstBuilder::buildTypePathSegment(rx::RxParser::TypePathSegmentContext *ctx)
     std::vector<GenericArg> generic_args;
     for (auto generic_arg : ctx->genericArgs()->genericArg())
     {
-      generic_args.push_back(buildGenericArg(generic_arg));
+      if (generic_arg->typeRef())
+      {
+        generic_args.push_back(buildGenericArg(generic_arg));
+      }
     }
     return PathSegment(name, std::move(generic_args));
   }
@@ -130,14 +129,7 @@ AstBuilder::buildTypePathSegment(rx::RxParser::TypePathSegmentContext *ctx)
 
 GenericArg AstBuilder::buildGenericArg(rx::RxParser::GenericArgContext *ctx)
 {
-  if (ctx->lifetime())
-  {
-    return GenericArg(false, nullptr, ctx->lifetime()->getText());
-  }
-  else
-  {
-    return GenericArg(true, buildType(ctx->typeRef()), std::nullopt);
-  }
+  return GenericArg(buildType(ctx->typeRef()));
 }
 
 std::unique_ptr<Expr>
@@ -212,12 +204,7 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
   }
   else if (ctx->closedCastType())
   {
-    std::optional<std::string> lifetime_arg = std::nullopt;
     bool mut_arg = false;
-    if (ctx->lifetime())
-    {
-      lifetime_arg = ctx->lifetime()->getText();
-    }
     if (ctx->MUT())
     {
       mut_arg = true;
@@ -225,15 +212,14 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
     if (ctx->AMP())
     {
       return std::make_unique<ReferenceType>(
-          buildClosedCastType(ctx->closedCastType()), mut_arg, lifetime_arg);
+          buildClosedCastType(ctx->closedCastType()), mut_arg);
     }
     else
     {
       return std::make_unique<ReferenceType>(
           std::make_unique<ReferenceType>(
-              buildClosedCastType(ctx->closedCastType()), mut_arg,
-              lifetime_arg),
-          false, std::nullopt);
+              buildClosedCastType(ctx->closedCastType()), mut_arg),
+          false);
     }
   }
   else
@@ -242,7 +228,10 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
     std::vector<GenericArg> generic_args;
     for (auto generic_arg : ctx->genericArgs()->genericArg())
     {
-      generic_args.push_back(buildGenericArg(generic_arg));
+      if (generic_arg->typeRef())
+      {
+        generic_args.push_back(buildGenericArg(generic_arg));
+      }
     }
     PathSegment last_segment = PathSegment(name, std::move(generic_args));
     std::vector<PathSegment> path_segments;
@@ -267,9 +256,10 @@ std::unique_ptr<Crate> AstBuilder::buildCrate(rx::RxParser::CrateContext *ctx)
   items.reserve(ctx->item().size());
   for (auto *ctx_item : ctx->item())
   {
-    if (buildItem(ctx_item))
+    std::unique_ptr<Item> item = buildItem(ctx_item);
+    if (item)
     {
-      items.push_back(std::move(buildItem(ctx_item)));
+      items.push_back(std::move(item));
     }
   }
   return std::make_unique<Crate>(std::move(items));
@@ -277,7 +267,7 @@ std::unique_ptr<Crate> AstBuilder::buildCrate(rx::RxParser::CrateContext *ctx)
 
 std::unique_ptr<Item> AstBuilder::buildItem(rx::RxParser::ItemContext *ctx)
 {
-  if (ctx->functionDefinition()) // func def
+  if (ctx->functionDefinition())
   {
     return buildFuncItem(ctx->functionDefinition());
   }
@@ -343,14 +333,60 @@ AstBuilder::buildFuncItem(rx::RxParser::FunctionDefinitionContext *ctx)
   {
     return_type = buildType(ctx->typeRef());
   }
-  return std::make_unique<FuncItem>(ident, self_param, func_params, return_type,
-                                    block_expr);
+  return std::make_unique<FuncItem>(std::move(ident), self_param,
+                                    std::move(func_params), std::move(return_type),
+                                    std::move(block_expr));
+}
+
+StructField AstBuilder::gerStructField(rx::RxParser::StructFieldContext *ctx)
+{
+  return StructField(ctx->identifier()->getText(), buildType(ctx->typeRef()));
+}
+std::vector<DeriveKind> AstBuilder::getDeriveKinds(
+    std::vector<rx::RxParser::OuterAttributeContext *> ctxs)
+{
+  std::vector<DeriveKind> result;
+  for (auto ctx : ctxs)
+  {
+    for (auto derive_name_ctx : ctx->deriveName())
+    {
+      if (derive_name_ctx->COPY())
+      {
+        result.push_back(DeriveKind::Copy);
+      }
+      else if (derive_name_ctx->CLONE())
+      {
+        result.push_back(DeriveKind::Clone);
+      }
+      else if (derive_name_ctx->PARTIAL_EQ())
+      {
+        result.push_back(DeriveKind::PartialEq);
+      }
+      else
+      {
+        result.push_back(DeriveKind::Eq);
+      }
+    }
+  }
+  return result;
 }
 
 std::unique_ptr<StructItem>
 AstBuilder::buildStructItem(rx::RxParser::StructDefinitionContext *ctx)
 {
-  
+  std::vector<DeriveKind> derives;
+  if (ctx->outerAttribute().size())
+  {
+    derives = getDeriveKinds(ctx->outerAttribute());
+  }
+  std::string ident = ctx->identifier()->getText();
+  std::vector<StructField> fields;
+  for (auto struct_field_ctx : ctx->structField())
+  {
+    fields.push_back(gerStructField(struct_field_ctx));
+  }
+  return std::make_unique<StructItem>(std::move(ident), std::move(derives),
+                                      std::move(fields));
 }
 std::unique_ptr<ConstItem>
 AstBuilder::buildConstItem(rx::RxParser::ConstantItemContext *ctx)
@@ -362,6 +398,20 @@ AstBuilder::buildConstItem(rx::RxParser::ConstantItemContext *ctx)
 std::unique_ptr<ImplItem>
 AstBuilder::buildImplItem(rx::RxParser::InherentImplContext *ctx)
 {
+  std::unique_ptr<Type> type = buildType(ctx->typeRef());
+  std::vector<std::unique_ptr<Item>> items;
+  for (auto item_ctx : ctx->associatedItem())
+  {
+    if (item_ctx->constantItem())
+    {
+      items.push_back(buildConstItem(item_ctx->constantItem()));
+    }
+    else
+    {
+      items.push_back(buildFuncItem(item_ctx->functionDefinition()));
+    }
+  }
+  return std::make_unique<ImplItem>(std::move(type), std::move(items));
 }
 
 std::unique_ptr<BlockExpr>
@@ -383,7 +433,7 @@ AstBuilder::buildBlockExpr(rx::RxParser::BlockExpressionContext *ctx)
   {
     tail_stmt = std::move(buildStmtExpr(ctx->statementExpression()));
   }
-  return std::make_unique<BlockExpr>(std::move(stmts), tail_stmt);
+  return std::make_unique<BlockExpr>(std::move(stmts), std::move(tail_stmt));
 }
 
 std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
@@ -1002,7 +1052,7 @@ AstBuilder::buildNonBlockPrimary(rx::RxParser::NonBlockPrimaryContext *ctx)
     {
       return std::make_unique<StructExpr>(
           buildPathExpr(ctx->pathInExpression()),
-          buildStructFields(ctx->structExprFields()));
+          buildStructExprFields(ctx->structExprFields()));
     }
   }
   else if (ctx->LPAREN())
@@ -1060,26 +1110,26 @@ AstBuilder::buildNonBlockPrimary(rx::RxParser::NonBlockPrimaryContext *ctx)
   }
 }
 
-std::vector<StructField>
-AstBuilder::buildStructFields(rx::RxParser::StructExprFieldsContext *ctx)
+std::vector<StructExprField>
+AstBuilder::buildStructExprFields(rx::RxParser::StructExprFieldsContext *ctx)
 {
-  std::vector<StructField> result{};
+  std::vector<StructExprField> result{};
   if (!ctx)
   {
     return result;
   }
   for (auto field : ctx->structExprField())
   {
-    result.push_back(buildStructField(field));
+    result.push_back(buildStructExprField(field));
   }
   return result;
 }
 
-StructField
-AstBuilder::buildStructField(rx::RxParser::StructExprFieldContext *ctx)
+StructExprField
+AstBuilder::buildStructExprField(rx::RxParser::StructExprFieldContext *ctx)
 {
-  return StructField(ctx->identifier()->getText(),
-                     buildExpr(ctx->expression()));
+  return StructExprField(ctx->identifier()->getText(),
+                         buildExpr(ctx->expression()));
 }
 
 std::unique_ptr<LiteralExpr>

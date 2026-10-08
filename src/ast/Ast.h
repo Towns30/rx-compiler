@@ -75,6 +75,24 @@ class BlockExpr;
 class Type;
 class ConstItem;
 
+enum class DeriveKind
+{
+  Copy,
+  Clone,
+  PartialEq,
+  Eq
+};
+
+struct StructField
+{
+  std::string ident_;
+  std::unique_ptr<Type> type_;
+
+  StructField(std::string ident, std::unique_ptr<Type> type);
+
+  void print(int space_num);
+};
+
 struct FuncParam
 {
   std::string ident_;
@@ -101,12 +119,9 @@ struct SelfParam
 
 struct GenericArg
 {
-  bool is_type_;
   std::unique_ptr<Type> type_;
-  std::optional<std::string> life_time_;
 
-  GenericArg(bool is_type, std::unique_ptr<Type> type,
-             std::optional<std::string> life_time);
+  explicit GenericArg(std::unique_ptr<Type> type);
 
   void print(int space_num);
 };
@@ -174,11 +189,12 @@ public:
   std::unique_ptr<BlockExpr> block_expr_;
 
   FuncItem(std::string ident, std::optional<SelfParam> self_param,
-           std::vector<FuncParam> func_params, std::unique_ptr<Type> return_type,
+           std::vector<FuncParam> func_params,
+           std::unique_ptr<Type> return_type,
            std::unique_ptr<BlockExpr> block_expr)
       : ident_(std::move(ident)), self_param_(std::move(self_param)),
-        func_params_(std::move(func_params)), return_type_(std::move(return_type)),
-        block_expr_(std::move(block_expr))
+        func_params_(std::move(func_params)),
+        return_type_(std::move(return_type)), block_expr_(std::move(block_expr))
   {
   }
 
@@ -192,18 +208,44 @@ public:
   std::unique_ptr<Type> type_;
   std::unique_ptr<Expr> const_value_;
 
+  ConstItem(std::string ident, std::unique_ptr<Type> type,
+            std::unique_ptr<Expr> const_value)
+      : ident_(std::move(ident)), type_(std::move(type)),
+        const_value_(std::move(const_value))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class ImplItem : public Item
 {
 public:
+  std::unique_ptr<Type> type_;
+  std::vector<std::unique_ptr<Item>> items_;
+
+  ImplItem(std::unique_ptr<Type> type, std::vector<std::unique_ptr<Item>> items)
+      : type_(std::move(type)), items_(std::move(items))
+  {
+  }
+
   void print(int space_num) override;
 };
 
 class StructItem : public Item
 {
 public:
+  std::string ident_;
+  std::vector<DeriveKind> derives_;
+  std::vector<StructField> fields_;
+
+  StructItem(std::string ident, std::vector<DeriveKind> derives,
+             std::vector<StructField> fields)
+      : ident_(std::move(ident)), derives_(std::move(derives)),
+        fields_(std::move(fields))
+  {
+  }
+
   void print(int space_num) override;
 };
 
@@ -303,13 +345,13 @@ public:
   void print(int space_num) override;
 };
 
-class StructField
+class StructExprField
 {
 public:
   std::string name_;
   std::unique_ptr<Expr> expr_;
 
-  StructField(std::string name, std::unique_ptr<Expr> expr)
+  StructExprField(std::string name, std::unique_ptr<Expr> expr)
       : name_(std::move(name)), expr_(std::move(expr))
   {
   }
@@ -319,10 +361,10 @@ class StructExpr : public Expr
 {
 public:
   std::unique_ptr<PathExpr> path_;
-  std::vector<StructField> struct_fields_;
+  std::vector<StructExprField> struct_fields_;
 
   StructExpr(std::unique_ptr<PathExpr> path,
-             std::vector<StructField> struct_fields)
+             std::vector<StructExprField> struct_fields)
       : path_(std::move(path)), struct_fields_(std::move(struct_fields))
   {
   }
@@ -581,12 +623,9 @@ class ReferenceType : public Type
 public:
   std::unique_ptr<Type> inner_type_;
   bool mut_;
-  std::optional<std::string> lifetime_;
 
-  ReferenceType(std::unique_ptr<Type> inner_type, bool mut = false,
-                std::optional<std::string> lifetime = std::nullopt)
-      : inner_type_(std::move(inner_type)), mut_(mut),
-        lifetime_(std::move(lifetime))
+  ReferenceType(std::unique_ptr<Type> inner_type, bool mut = false)
+      : inner_type_(std::move(inner_type)), mut_(mut)
   {
   }
 

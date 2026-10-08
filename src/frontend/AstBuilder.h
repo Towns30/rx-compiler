@@ -20,6 +20,8 @@ private:
   std::unique_ptr<Expr> buildExpr(rx::RxParser::ExpressionContext *ctx);
   FuncParam getFuncParam(rx::RxParser::FunctionParamContext *ctx);
   SelfParam getSelfParam(rx::RxParser::SelfParamContext *ctx);
+  StructField gerStructField(rx::RxParser::StructFieldContext *ctx);
+  std::vector<DeriveKind> getDeriveKinds(std::vector<rx::RxParser::OuterAttributeContext *>ctxs);
   std::unique_ptr<FuncItem>
   buildFuncItem(rx::RxParser::FunctionDefinitionContext *ctx);
   std::unique_ptr<StructItem>
@@ -85,10 +87,10 @@ private:
   buildPrimaryExpr(rx::RxParser::PrimaryExpressionContext *ctx);
   std::unique_ptr<Expr>
   buildNonBlockPrimary(rx::RxParser::NonBlockPrimaryContext *ctx);
-  std::vector<StructField>
-  buildStructFields(rx::RxParser::StructExprFieldsContext *ctx);
-  StructField
-  buildStructField(rx::RxParser::StructExprFieldContext *ctx);
+  std::vector<StructExprField>
+  buildStructExprFields(rx::RxParser::StructExprFieldsContext *ctx);
+  StructExprField
+  buildStructExprField(rx::RxParser::StructExprFieldContext *ctx);
   std::unique_ptr<LiteralExpr>
   buildLiteralExpr(rx::RxParser::LiteralExpressionContext *ctx);
   std::unique_ptr<Type> buildType(rx::RxParser::TypeRefContext *ctx);
@@ -107,7 +109,6 @@ private:
   PathSegment buildPathExprSegment(rx::RxParser::PathExprSegmentContext *ctx);
   std::unique_ptr<Type> buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx);
   std::unique_ptr<Expr> buildExprWithBlock(rx::RxParser::ExpressionWithBlockContext *ctx);
-  
   
   
   std::unique_ptr<Expr>
