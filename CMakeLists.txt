@@ -24,3 +24,17 @@ add_executable(rx-ast-builder
 target_include_directories(rx-ast-builder PRIVATE generated)
 
 target_link_libraries(rx-ast-builder PRIVATE antlr4_static)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(rx-ast-spans-test
+        tests/unit/ast_spans.cpp
+        src/ast/Ast.cpp
+        src/frontend/AstBuilder.cpp
+        generated/RxLexer.cpp
+        generated/RxParser.cpp
+    )
+    target_include_directories(rx-ast-spans-test PRIVATE generated src)
+    target_link_libraries(rx-ast-spans-test PRIVATE antlr4_static)
+    add_test(NAME ast-source-spans COMMAND rx-ast-spans-test)
+endif()

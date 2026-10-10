@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Utils.h"
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -8,6 +9,13 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+struct SourceSpan
+{
+  // [begin, end)
+  std::size_t begin;
+  std::size_t end;
+};
 
 inline void PrintSpace(int num)
 {
@@ -85,7 +93,9 @@ enum class DeriveKind
 
 struct StructField
 {
+  std::optional<SourceSpan> span_;
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   std::unique_ptr<Type> type_;
 
   StructField(std::string ident, std::unique_ptr<Type> type);
@@ -95,7 +105,9 @@ struct StructField
 
 struct FuncParam
 {
+  std::optional<SourceSpan> span_;
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   bool mut_;
   std::unique_ptr<Type> type_;
 
@@ -106,6 +118,8 @@ struct FuncParam
 
 struct SelfParam
 {
+  std::optional<SourceSpan> span_;
+  std::optional<SourceSpan> self_span_;
   bool is_reference_;
   bool mut_;
 
@@ -119,6 +133,7 @@ struct SelfParam
 
 struct GenericArg
 {
+  std::optional<SourceSpan> span_;
   std::unique_ptr<Type> type_;
 
   explicit GenericArg(std::unique_ptr<Type> type);
@@ -128,7 +143,9 @@ struct GenericArg
 
 struct PathSegment
 {
+  std::optional<SourceSpan> span_;
   std::string name_; // Vec、new、self、Self
+  std::optional<SourceSpan> name_span_;
   std::vector<GenericArg> generic_args_;
 
   PathSegment(std::string name, std::vector<GenericArg> generic_args = {})
@@ -141,6 +158,7 @@ struct PathSegment
 
 struct Path
 {
+  std::optional<SourceSpan> span_;
   bool absolute_ = false; // 是否以 :: 开头
   std::vector<PathSegment> segments_;
 
@@ -155,6 +173,8 @@ struct Path
 class ASTNode
 {
 public:
+  // 未填入位置或没有直接对应的源码时为 std::nullopt。
+  std::optional<SourceSpan> span_;
   virtual ~ASTNode() = default;
   virtual void print(int space_num) = 0;
 };
@@ -183,6 +203,7 @@ class FuncItem : public Item
 {
 public:
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   std::optional<SelfParam> self_param_;
   std::vector<FuncParam> func_params_;
   std::unique_ptr<Type> return_type_;
@@ -205,6 +226,7 @@ class ConstItem : public Item
 {
 public:
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   std::unique_ptr<Type> type_;
   std::unique_ptr<Expr> const_value_;
 
@@ -236,6 +258,7 @@ class StructItem : public Item
 {
 public:
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   std::vector<DeriveKind> derives_;
   std::vector<StructField> fields_;
 
@@ -257,6 +280,7 @@ class LetStmt : public Stmt
 {
 public:
   std::string ident_;
+  std::optional<SourceSpan> ident_span_;
   bool mut_;
   std::unique_ptr<Type> type_;
   std::unique_ptr<Expr> expr_;
@@ -288,6 +312,8 @@ class Expr : public ASTNode
 class LiteralExpr : public Expr
 {
 public:
+  // 字面量 token 的范围，包含整数后缀，不包含外围括号或一元负号。
+  std::optional<SourceSpan> literal_span_;
   bool is_int_;
   bool bool_value_;
   std::uint64_t int_value_;
@@ -348,7 +374,9 @@ public:
 class StructExprField
 {
 public:
+  std::optional<SourceSpan> span_;
   std::string name_;
+  std::optional<SourceSpan> name_span_;
   std::unique_ptr<Expr> expr_;
 
   StructExprField(std::string name, std::unique_ptr<Expr> expr)
@@ -567,6 +595,7 @@ class MemberExpr : public Expr
 public:
   std::unique_ptr<Expr> base_;
   std::string member_;
+  std::optional<SourceSpan> member_span_;
 
   MemberExpr(std::unique_ptr<Expr> base, std::string member)
       : base_(std::move(base)), member_(std::move(member))

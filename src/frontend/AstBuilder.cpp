@@ -1,8 +1,60 @@
 #include "AstBuilder.h"
 
+#include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+std::optional<SourceSpan> AstBuilder::spanOf(const antlr4::Token *token)
+{
+  if (!token)
+  {
+    return std::nullopt;
+  }
+  const auto begin = token->getStartIndex();
+  const auto invalid = std::numeric_limits<std::size_t>::max();
+  if (begin == invalid)
+  {
+    return std::nullopt;
+  }
+  if (token->getType() == antlr4::Token::EOF)
+  {
+    return SourceSpan{begin, begin};
+  }
+  const auto stop = token->getStopIndex();
+  if (stop == invalid || stop < begin)
+  {
+    return std::nullopt;
+  }
+  return SourceSpan{begin, stop + 1};
+}
+
+std::optional<SourceSpan>
+AstBuilder::spanOf(const antlr4::ParserRuleContext *ctx)
+{
+  if (!ctx)
+  {
+    return std::nullopt;
+  }
+  const auto first = spanOf(ctx->getStart());
+  const auto last = spanOf(ctx->getStop());
+  if (!first || !last)
+  {
+    return std::nullopt;
+  }
+  if (last->end <= first->begin)
+  {
+    return SourceSpan{first->begin, first->begin};
+  }
+  return SourceSpan{first->begin, last->end};
+}
+
+SourceSpan AstBuilder::cover(SourceSpan first, SourceSpan last)
+{
+  return SourceSpan{std::min(first.begin, last.begin),
+                    std::max(first.end, last.end)};
+}
 
 std::unique_ptr<PathExpr>
 AstBuilder::buildPathExpr(rx::RxParser::PathInExpressionContext *ctx)
@@ -12,7 +64,9 @@ AstBuilder::buildPathExpr(rx::RxParser::PathInExpressionContext *ctx)
   {
     path.push_back(buildPathExprSegment(type_path_seg));
   }
-  return std::make_unique<PathExpr>(std::move(path));
+  auto result = std::make_unique<PathExpr>(std::move(path));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 Path AstBuilder::buildExpressionPath(rx::RxParser::PathInExpressionContext *ctx)
@@ -22,7 +76,9 @@ Path AstBuilder::buildExpressionPath(rx::RxParser::PathInExpressionContext *ctx)
   {
     path.push_back(buildPathExprSegment(type_path_seg));
   }
-  return Path(std::move(path));
+  auto result = Path(std::move(path));
+  result.span_ = spanOf(ctx);
+  return result;
 }
 
 PathSegment
@@ -39,9 +95,15 @@ AstBuilder::buildPathExprSegment(rx::RxParser::PathExprSegmentContext *ctx)
         generic_args.push_back(buildGenericArg(generic_arg));
       }
     }
-    return PathSegment(name, std::move(generic_args));
+    auto result = PathSegment(name, std::move(generic_args));
+    result.span_ = spanOf(ctx);
+    result.name_span_ = spanOf(ctx->pathIdentSegment());
+    return result;
   }
-  return PathSegment(name, std::vector<GenericArg>{});
+  auto result = PathSegment(name, std::vector<GenericArg>{});
+  result.span_ = spanOf(ctx);
+  result.name_span_ = spanOf(ctx->pathIdentSegment());
+  return result;
 }
 
 std::unique_ptr<Type> AstBuilder::buildType(rx::RxParser::TypeRefContext *ctx)
@@ -52,7 +114,9 @@ std::unique_ptr<Type> AstBuilder::buildType(rx::RxParser::TypeRefContext *ctx)
   }
   else if (ctx->LPAREN())
   {
-    return std::make_unique<UnitType>();
+    auto result = std::make_unique<UnitType>();
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->typePath())
   {
@@ -76,7 +140,9 @@ AstBuilder::buildPathType(rx::RxParser::TypePathContext *ctx)
   {
     path.push_back(buildTypePathSegment(type_path_seg));
   }
-  return std::make_unique<PathType>(std::move(path));
+  auto result = std::make_unique<PathType>(std::move(path));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 std::unique_ptr<ReferenceType>
@@ -89,13 +155,28 @@ AstBuilder::buildReferenceType(rx::RxParser::ReferenceTypeContext *ctx)
   }
   if (ctx->AMP())
   {
-    return std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg);
+    auto result =
+        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg);
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else
   {
-    return std::make_unique<ReferenceType>(
-        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg),
-        false);
+    auto inner_span = spanOf(ctx);
+    if (inner_span && inner_span->begin < inner_span->end)
+    {
+      ++inner_span->begin;
+    }
+    else
+    {
+      inner_span = std::nullopt;
+    }
+    auto inner_node =
+        std::make_unique<ReferenceType>(buildType(ctx->typeRef()), mut_arg);
+    inner_node->span_ = inner_span;
+    auto result = std::make_unique<ReferenceType>(std::move(inner_node), false);
+    result->span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -104,8 +185,10 @@ AstBuilder::buildArrayType(rx::RxParser::ArrayTypeContext *ctx)
 {
   std::unique_ptr<Type> type_ptr = buildType(ctx->typeRef());
   std::unique_ptr<Expr> const_value = buildConstValue(ctx->constValue());
-  return std::make_unique<ArrayType>(std::move(type_ptr),
-                                     std::move(const_value));
+  auto result =
+      std::make_unique<ArrayType>(std::move(type_ptr), std::move(const_value));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 PathSegment
@@ -122,14 +205,22 @@ AstBuilder::buildTypePathSegment(rx::RxParser::TypePathSegmentContext *ctx)
         generic_args.push_back(buildGenericArg(generic_arg));
       }
     }
-    return PathSegment(name, std::move(generic_args));
+    auto result = PathSegment(name, std::move(generic_args));
+    result.span_ = spanOf(ctx);
+    result.name_span_ = spanOf(ctx->pathIdentSegment());
+    return result;
   }
-  return PathSegment(name, std::vector<GenericArg>{});
+  auto result = PathSegment(name, std::vector<GenericArg>{});
+  result.span_ = spanOf(ctx);
+  result.name_span_ = spanOf(ctx->pathIdentSegment());
+  return result;
 }
 
 GenericArg AstBuilder::buildGenericArg(rx::RxParser::GenericArgContext *ctx)
 {
-  return GenericArg(buildType(ctx->typeRef()));
+  auto result = GenericArg(buildType(ctx->typeRef()));
+  result.span_ = spanOf(ctx);
+  return result;
 }
 
 std::unique_ptr<Expr>
@@ -137,18 +228,28 @@ AstBuilder::buildConstValue(rx::RxParser::ConstValueContext *ctx)
 {
   if (ctx->INTEGER_LITERAL())
   {
-    return std::make_unique<LiteralExpr>(
+    auto result = std::make_unique<LiteralExpr>(
         true, false, LiteralStringToInt(ctx->INTEGER_LITERAL()->getText()),
         LiteralStringToIntegerType(ctx->INTEGER_LITERAL()->getText()));
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->TRUE())
   {
-    return std::make_unique<LiteralExpr>(false, true, 0, IntegerType::Inferred);
+    auto result =
+        std::make_unique<LiteralExpr>(false, true, 0, IntegerType::Inferred);
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->FALSE())
   {
-    return std::make_unique<LiteralExpr>(false, false, 0,
-                                         IntegerType::Inferred);
+    auto result =
+        std::make_unique<LiteralExpr>(false, false, 0, IntegerType::Inferred);
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->pathInExpression())
   {
@@ -156,8 +257,10 @@ AstBuilder::buildConstValue(rx::RxParser::ConstValueContext *ctx)
   }
   else if (ctx->MINUS())
   {
-    return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
-                                       buildMagnitude(ctx->magnitude()));
+    auto result = std::make_unique<UnaryExpr>(UnaryOperator::Negate,
+                                              buildMagnitude(ctx->magnitude()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else
   {
@@ -170,9 +273,12 @@ AstBuilder::buildMagnitude(rx::RxParser::MagnitudeContext *ctx)
 {
   if (ctx->INTEGER_LITERAL())
   {
-    return std::make_unique<LiteralExpr>(
+    auto result = std::make_unique<LiteralExpr>(
         true, false, LiteralStringToInt(ctx->INTEGER_LITERAL()->getText()),
         LiteralStringToIntegerType(ctx->INTEGER_LITERAL()->getText()));
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->pathInExpression())
   {
@@ -191,7 +297,9 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
   {
     if (!ctx->typeRef())
     {
-      return std::make_unique<UnitType>();
+      auto result = std::make_unique<UnitType>();
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
@@ -211,15 +319,29 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
     }
     if (ctx->AMP())
     {
-      return std::make_unique<ReferenceType>(
+      auto result = std::make_unique<ReferenceType>(
           buildClosedCastType(ctx->closedCastType()), mut_arg);
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<ReferenceType>(
-          std::make_unique<ReferenceType>(
-              buildClosedCastType(ctx->closedCastType()), mut_arg),
-          false);
+      auto inner_span = spanOf(ctx);
+      if (inner_span && inner_span->begin < inner_span->end)
+      {
+        ++inner_span->begin;
+      }
+      else
+      {
+        inner_span = std::nullopt;
+      }
+      auto inner_node = std::make_unique<ReferenceType>(
+          buildClosedCastType(ctx->closedCastType()), mut_arg);
+      inner_node->span_ = inner_span;
+      auto result =
+          std::make_unique<ReferenceType>(std::move(inner_node), false);
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
@@ -234,13 +356,25 @@ AstBuilder::buildClosedCastType(rx::RxParser::ClosedCastTypeContext *ctx)
       }
     }
     PathSegment last_segment = PathSegment(name, std::move(generic_args));
+    const auto node_span_first = spanOf(ctx->pathIdentSegment()->getStart());
+    const auto node_span_last = spanOf(ctx->genericArgs()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    last_segment.span_ = node_span;
+    last_segment.name_span_ = spanOf(ctx->pathIdentSegment());
     std::vector<PathSegment> path_segments;
     for (auto path_segment_ctx : ctx->typePathSegment())
     {
       path_segments.push_back(buildTypePathSegment(path_segment_ctx));
     }
     path_segments.push_back(std::move(last_segment));
-    return std::make_unique<PathType>(std::move(path_segments));
+    auto result = std::make_unique<PathType>(std::move(path_segments));
+    result->span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -262,7 +396,9 @@ std::unique_ptr<Crate> AstBuilder::buildCrate(rx::RxParser::CrateContext *ctx)
       items.push_back(std::move(item));
     }
   }
-  return std::make_unique<Crate>(std::move(items));
+  auto result = std::make_unique<Crate>(std::move(items));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 std::unique_ptr<Item> AstBuilder::buildItem(rx::RxParser::ItemContext *ctx)
@@ -294,19 +430,28 @@ FuncParam AstBuilder::getFuncParam(rx::RxParser::FunctionParamContext *ctx)
   if (ctx->identifierBinding()->MUT())
 
   {
-    return FuncParam(ctx->identifierBinding()->identifier()->getText(), true,
-                     buildType(ctx->typeRef()));
+    auto result = FuncParam(ctx->identifierBinding()->identifier()->getText(),
+                            true, buildType(ctx->typeRef()));
+    result.span_ = spanOf(ctx);
+    result.ident_span_ = spanOf(ctx->identifierBinding()->identifier());
+    return result;
   }
   else
   {
-    return FuncParam(ctx->identifierBinding()->identifier()->getText(), false,
-                     buildType(ctx->typeRef()));
+    auto result = FuncParam(ctx->identifierBinding()->identifier()->getText(),
+                            false, buildType(ctx->typeRef()));
+    result.span_ = spanOf(ctx);
+    result.ident_span_ = spanOf(ctx->identifierBinding()->identifier());
+    return result;
   }
 }
 
 SelfParam AstBuilder::getSelfParam(rx::RxParser::SelfParamContext *ctx)
 {
-  return SelfParam(bool(ctx->AMP()), bool(ctx->MUT()));
+  auto result = SelfParam(bool(ctx->AMP()), bool(ctx->MUT()));
+  result.span_ = spanOf(ctx);
+  result.self_span_ = spanOf(ctx->SELF_VALUE()->getSymbol());
+  return result;
 }
 
 std::unique_ptr<FuncItem>
@@ -333,14 +478,21 @@ AstBuilder::buildFuncItem(rx::RxParser::FunctionDefinitionContext *ctx)
   {
     return_type = buildType(ctx->typeRef());
   }
-  return std::make_unique<FuncItem>(std::move(ident), self_param,
-                                    std::move(func_params), std::move(return_type),
-                                    std::move(block_expr));
+  auto result = std::make_unique<FuncItem>(
+      std::move(ident), self_param, std::move(func_params),
+      std::move(return_type), std::move(block_expr));
+  result->span_ = spanOf(ctx);
+  result->ident_span_ = spanOf(ctx->identifier());
+  return result;
 }
 
 StructField AstBuilder::gerStructField(rx::RxParser::StructFieldContext *ctx)
 {
-  return StructField(ctx->identifier()->getText(), buildType(ctx->typeRef()));
+  auto result =
+      StructField(ctx->identifier()->getText(), buildType(ctx->typeRef()));
+  result.span_ = spanOf(ctx);
+  result.ident_span_ = spanOf(ctx->identifier());
+  return result;
 }
 std::vector<DeriveKind> AstBuilder::getDeriveKinds(
     std::vector<rx::RxParser::OuterAttributeContext *> ctxs)
@@ -385,15 +537,21 @@ AstBuilder::buildStructItem(rx::RxParser::StructDefinitionContext *ctx)
   {
     fields.push_back(gerStructField(struct_field_ctx));
   }
-  return std::make_unique<StructItem>(std::move(ident), std::move(derives),
-                                      std::move(fields));
+  auto result = std::make_unique<StructItem>(
+      std::move(ident), std::move(derives), std::move(fields));
+  result->span_ = spanOf(ctx);
+  result->ident_span_ = spanOf(ctx->identifier());
+  return result;
 }
 std::unique_ptr<ConstItem>
 AstBuilder::buildConstItem(rx::RxParser::ConstantItemContext *ctx)
 {
-  return std::make_unique<ConstItem>(ctx->identifier()->getText(),
-                                     buildType(ctx->typeRef()),
-                                     buildConstValue(ctx->constValue()));
+  auto result = std::make_unique<ConstItem>(ctx->identifier()->getText(),
+                                            buildType(ctx->typeRef()),
+                                            buildConstValue(ctx->constValue()));
+  result->span_ = spanOf(ctx);
+  result->ident_span_ = spanOf(ctx->identifier());
+  return result;
 }
 std::unique_ptr<ImplItem>
 AstBuilder::buildImplItem(rx::RxParser::InherentImplContext *ctx)
@@ -411,7 +569,9 @@ AstBuilder::buildImplItem(rx::RxParser::InherentImplContext *ctx)
       items.push_back(buildFuncItem(item_ctx->functionDefinition()));
     }
   }
-  return std::make_unique<ImplItem>(std::move(type), std::move(items));
+  auto result = std::make_unique<ImplItem>(std::move(type), std::move(items));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 std::unique_ptr<BlockExpr>
@@ -433,7 +593,10 @@ AstBuilder::buildBlockExpr(rx::RxParser::BlockExpressionContext *ctx)
   {
     tail_stmt = std::move(buildStmtExpr(ctx->statementExpression()));
   }
-  return std::make_unique<BlockExpr>(std::move(stmts), std::move(tail_stmt));
+  auto result =
+      std::make_unique<BlockExpr>(std::move(stmts), std::move(tail_stmt));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 
 std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
@@ -444,13 +607,17 @@ std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
   }
   else if (ctx->expressionWithBlock())
   {
-    return std::make_unique<ExprStmt>(
+    auto result = std::make_unique<ExprStmt>(
         buildExprWithBlock(ctx->expressionWithBlock()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->statementExpression())
   {
-    return std::make_unique<ExprStmt>(
-        buildStmtExpr(ctx->statementExpression()));
+    auto result =
+        std::make_unique<ExprStmt>(buildStmtExpr(ctx->statementExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   return nullptr;
 }
@@ -466,8 +633,11 @@ AstBuilder::buildLetStmt(rx::RxParser::LetStatementContext *ctx)
     type = buildType(ctx->typeRef());
   }
   std::unique_ptr<Expr> expr = buildExpr(ctx->expression());
-  return std::make_unique<LetStmt>(std::move(ident), mut, std::move(type),
-                                   std::move(expr));
+  auto result = std::make_unique<LetStmt>(std::move(ident), mut,
+                                          std::move(type), std::move(expr));
+  result->span_ = spanOf(ctx);
+  result->ident_span_ = spanOf(ctx->identifierBinding()->identifier());
+  return result;
 }
 
 std::unique_ptr<Expr>
@@ -479,7 +649,9 @@ AstBuilder::buildExpr(rx::RxParser::ExpressionContext *ctx)
 std::unique_ptr<ExprStmt>
 AstBuilder::buildExprStmt(rx::RxParser::StatementExpressionContext *ctx)
 {
-  return std::make_unique<ExprStmt>(buildStmtExpr(ctx));
+  auto result = std::make_unique<ExprStmt>(buildStmtExpr(ctx));
+  result->span_ = spanOf(ctx);
+  return result;
 }
 AssignmentOperator
 AstBuilder::getAssignOperator(rx::RxParser::AssignmentOperatorContext *ctx)
@@ -536,9 +708,11 @@ AstBuilder::buildAssignExpr(rx::RxParser::AssignmentExpressionContext *ctx)
 {
   if (ctx->assignmentOperator())
   {
-    return std::make_unique<AssignExpr>(
+    auto result = std::make_unique<AssignExpr>(
         getAssignOperator(ctx->assignmentOperator()),
         buildOrExpr(ctx->logicalOrExpression()), buildExpr(ctx->expression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   return buildOrExpr(ctx->logicalOrExpression());
 }
@@ -549,9 +723,19 @@ AstBuilder::buildOrExpr(rx::RxParser::LogicalOrExpressionContext *ctx)
       buildAndExpr(ctx->logicalAndExpression()[0]);
   for (int i = 1; i < ctx->logicalAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->logicalAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalOr, std::move(result_ptr),
         buildAndExpr(ctx->logicalAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -562,9 +746,19 @@ AstBuilder::buildAndExpr(rx::RxParser::LogicalAndExpressionContext *ctx)
       buildCompExpr(ctx->comparisonExpression()[0]);
   for (int i = 1; i < ctx->comparisonExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->comparisonExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalAnd, std::move(result_ptr),
         buildCompExpr(ctx->comparisonExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -595,16 +789,36 @@ AstBuilder::buildCompExpr(rx::RxParser::ComparisonExpressionContext *ctx)
 {
   if (ctx->LT())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitOrExpression()[0]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         BinaryOperator::Less, buildBitOrExpr(ctx->closedBitOrExpression()),
         buildBitOrExpr(ctx->bitOrExpression()[0]));
+    result->span_ = node_span;
+    return result;
   }
   if (ctx->comparisonExceptLt())
   {
-    return std::make_unique<BinaryExpr>(
-        getCompOperator(ctx->comparisonExceptLt()),
-        buildBitOrExpr(ctx->bitOrExpression()[0]),
-        buildBitOrExpr(ctx->bitOrExpression()[1]));
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitOrExpression()[1]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result =
+        std::make_unique<BinaryExpr>(getCompOperator(ctx->comparisonExceptLt()),
+                                     buildBitOrExpr(ctx->bitOrExpression()[0]),
+                                     buildBitOrExpr(ctx->bitOrExpression()[1]));
+    result->span_ = node_span;
+    return result;
   }
   return buildBitOrExpr(ctx->bitOrExpression()[0]);
 }
@@ -615,9 +829,18 @@ AstBuilder::buildBitOrExpr(rx::RxParser::BitOrExpressionContext *ctx)
       buildBitXorExpr(ctx->bitXorExpression()[0]);
   for (int i = 1; i < ctx->bitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildBitXorExpr(ctx->bitXorExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -632,13 +855,31 @@ AstBuilder::buildBitOrExpr(rx::RxParser::ClosedBitOrExpressionContext *ctx)
       buildBitXorExpr(ctx->bitXorExpression()[0]);
   for (int i = 1; i < ctx->bitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildBitXorExpr(ctx->bitXorExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedBitXorExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitOr, std::move(result_ptr),
       buildBitXorExpr(ctx->closedBitXorExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr>
@@ -648,9 +889,18 @@ AstBuilder::buildBitXorExpr(rx::RxParser::BitXorExpressionContext *ctx)
       buildBitAndExpr(ctx->bitAndExpression()[0]);
   for (int i = 1; i < ctx->bitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildBitAndExpr(ctx->bitAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -665,13 +915,31 @@ AstBuilder::buildBitXorExpr(rx::RxParser::ClosedBitXorExpressionContext *ctx)
       buildBitAndExpr(ctx->bitAndExpression()[0]);
   for (int i = 1; i < ctx->bitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildBitAndExpr(ctx->bitAndExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedBitAndExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitXor, std::move(result_ptr),
       buildBitAndExpr(ctx->closedBitAndExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr>
@@ -680,9 +948,18 @@ AstBuilder::buildBitAndExpr(rx::RxParser::BitAndExpressionContext *ctx)
   std::unique_ptr<Expr> result_ptr = buildShiftExpr(ctx->shiftExpression()[0]);
   for (int i = 1; i < ctx->shiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->shiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildShiftExpr(ctx->shiftExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -696,13 +973,31 @@ AstBuilder::buildBitAndExpr(rx::RxParser::ClosedBitAndExpressionContext *ctx)
   std::unique_ptr<Expr> result_ptr = buildShiftExpr(ctx->shiftExpression()[0]);
   for (int i = 1; i < ctx->shiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->shiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildShiftExpr(ctx->shiftExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedShiftExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitAnd, std::move(result_ptr),
       buildShiftExpr(ctx->closedShiftExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 
@@ -726,8 +1021,17 @@ AstBuilder::buildShiftExpr(rx::RxParser::ShiftExpressionContext *ctx)
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -745,8 +1049,17 @@ AstBuilder::buildShiftExpr(rx::RxParser::ShiftExpressionContext *ctx)
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -773,8 +1086,17 @@ AstBuilder::buildShiftExpr(rx::RxParser::ClosedShiftExpressionContext *ctx)
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -792,8 +1114,17 @@ AstBuilder::buildShiftExpr(rx::RxParser::ClosedShiftExpressionContext *ctx)
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -810,8 +1141,17 @@ AstBuilder::buildAddExpr(rx::RxParser::AdditiveExpressionContext *ctx)
   for (int i = 1; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   return result_expr;
 }
@@ -828,14 +1168,34 @@ AstBuilder::buildAddExpr(rx::RxParser::ClosedAdditiveExpressionContext *ctx)
   for (int i = 1; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
 
   BinaryOperator last_op = getAddOperator(operators.back());
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->closedMultiplicativeExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildMultExpr(ctx->closedMultiplicativeExpression()));
+  result->span_ = node_span;
+  return result;
 }
 
 BinaryOperator
@@ -870,9 +1230,18 @@ AstBuilder::buildMultExpr(rx::RxParser::MultiplicativeExpressionContext *ctx)
     std::unique_ptr<Expr> result_expr = buildCastExpr(ctx->castExpression()[0]);
     for (int i = 1; i < ctx->castExpression().size(); i++)
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(ctx->castExpression()[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<BinaryExpr>(
           getMultOperator(ctx->multiplicativeOperator()[i - 1]),
           std::move(result_expr), buildCastExpr(ctx->castExpression()[i]));
+      result_expr->span_ = node_span;
     }
     return std::move(result_expr);
   }
@@ -891,13 +1260,32 @@ std::unique_ptr<Expr> AstBuilder::buildMultExpr(
   for (int i = 1; i < cast_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getMultOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(cast_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildCastExpr(cast_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   BinaryOperator last_op = getMultOperator(operators[operators.size() - 1]);
-  return std::make_unique<BinaryExpr>(
-      last_op, std::move(result_expr),
-      buildCastExpr(ctx->closedCastExpression()));
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedCastExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result =
+      std::make_unique<BinaryExpr>(last_op, std::move(result_expr),
+                                   buildCastExpr(ctx->closedCastExpression()));
+  result->span_ = node_span;
+  return result;
 }
 std::unique_ptr<Expr>
 AstBuilder::buildCastExpr(rx::RxParser::CastExpressionContext *ctx)
@@ -907,8 +1295,17 @@ AstBuilder::buildCastExpr(rx::RxParser::CastExpressionContext *ctx)
     std::unique_ptr<Expr> result_ptr = buildUnaryExpr(ctx->unaryExpression());
     for (auto type_ctx : ctx->typeRef())
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(type_ctx->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_ptr = std::make_unique<CastExpr>(std::move(result_ptr),
                                               buildType(type_ctx));
+      result_ptr->span_ = node_span;
     }
     return std::move(result_ptr);
   }
@@ -919,9 +1316,19 @@ AstBuilder::buildCastExpr(rx::RxParser::ClosedCastExpressionContext *ctx)
 {
   if (ctx->AS())
   {
-    return std::make_unique<CastExpr>(
-        buildCastExpr(ctx->castExpression()),
-        buildClosedCastType(ctx->closedCastType()));
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->closedCastType()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result =
+        std::make_unique<CastExpr>(buildCastExpr(ctx->castExpression()),
+                                   buildClosedCastType(ctx->closedCastType()));
+    result->span_ = node_span;
+    return result;
   }
   return buildUnaryExpr(ctx->unaryExpression());
 }
@@ -934,31 +1341,52 @@ AstBuilder::buildUnaryExpr(rx::RxParser::UnaryExpressionContext *ctx)
     auto expr = buildUnaryExpr(ctx->unaryExpression());
     if (op->MINUS())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
-                                         std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Negate, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->NOT())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->STAR())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
-                                         std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
+                                                std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->AMP())
     {
       UnaryOperator kind =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(kind, std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(kind, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
       UnaryOperator kind_in =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(
-          UnaryOperator::Borrow,
-          std::make_unique<UnaryExpr>(kind_in, std::move(expr)));
+      auto inner_span = spanOf(ctx);
+      if (inner_span && inner_span->begin < inner_span->end)
+      {
+        ++inner_span->begin;
+      }
+      else
+      {
+        inner_span = std::nullopt;
+      }
+      auto inner_node = std::make_unique<UnaryExpr>(kind_in, std::move(expr));
+      inner_node->span_ = inner_span;
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Borrow,
+                                                std::move(inner_node));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
@@ -982,19 +1410,46 @@ AstBuilder::buildPostfixExpr(rx::RxParser::PostfixExpressionContext *ctx)
       {
         arguments.push_back(buildExpr(expr));
       }
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<CallExpr>(std::move(result_expr),
                                                std::move(arguments));
+      result_expr->span_ = node_span;
     }
     else if (postfixs[i]->expression())
     {
       std::unique_ptr<Expr> index_expr = buildExpr(postfixs[i]->expression());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<IndexExpr>(std::move(result_expr),
                                                 std::move(index_expr));
+      result_expr->span_ = node_span;
     }
     else
     {
       result_expr =
           buildDotSuffix(std::move(result_expr), postfixs[i]->dotSuffix());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
+      result_expr->span_ = node_span;
     }
   }
   return result_expr;
@@ -1004,6 +1459,11 @@ std::unique_ptr<Expr>
 AstBuilder::buildDotSuffix(std::unique_ptr<Expr> base,
                            rx::RxParser::DotSuffixContext *ctx)
 {
+  const auto suffix_span = spanOf(ctx);
+  const auto full_span =
+      base->span_ && suffix_span
+          ? std::optional<SourceSpan>(cover(*base->span_, *suffix_span))
+          : std::nullopt;
   if (ctx->callArguments())
   {
     std::vector<std::unique_ptr<Expr>> arguments;
@@ -1011,14 +1471,19 @@ AstBuilder::buildDotSuffix(std::unique_ptr<Expr> base,
     {
       arguments.push_back(buildExpr(expr_ctx));
     }
-    return std::make_unique<MethodCallExpr>(
+    auto result = std::make_unique<MethodCallExpr>(
         std::move(base), buildPathExprSegment(ctx->pathExprSegment()),
         std::move(arguments));
+    result->span_ = full_span;
+    return result;
   }
   else
   {
-    return std::make_unique<MemberExpr>(std::move(base),
-                                        ctx->identifier()->getText());
+    auto result = std::make_unique<MemberExpr>(std::move(base),
+                                               ctx->identifier()->getText());
+    result->span_ = full_span;
+    result->member_span_ = spanOf(ctx->identifier());
+    return result;
   }
 }
 
@@ -1050,16 +1515,20 @@ AstBuilder::buildNonBlockPrimary(rx::RxParser::NonBlockPrimaryContext *ctx)
     }
     else
     {
-      return std::make_unique<StructExpr>(
+      auto result = std::make_unique<StructExpr>(
           buildPathExpr(ctx->pathInExpression()),
           buildStructExprFields(ctx->structExprFields()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else if (ctx->LPAREN())
   {
     if (!ctx->expression())
     {
-      return std::make_unique<UnitExpr>();
+      auto result = std::make_unique<UnitExpr>();
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
@@ -1071,42 +1540,56 @@ AstBuilder::buildNonBlockPrimary(rx::RxParser::NonBlockPrimaryContext *ctx)
     auto array_ctx = ctx->arrayExpression();
     if (array_ctx->SEMI())
     {
-      return std::make_unique<ArrayExpr>(
-          buildExpr(array_ctx->expression(0)),
-          buildConstValue(array_ctx->constValue()));
+      auto result =
+          std::make_unique<ArrayExpr>(buildExpr(array_ctx->expression(0)),
+                                      buildConstValue(array_ctx->constValue()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     std::vector<std::unique_ptr<Expr>> exprs;
     for (auto expr_ctx : array_ctx->expression())
     {
       exprs.push_back(buildExpr(expr_ctx));
     }
-    return std::make_unique<ArrayExpr>(std::move(exprs));
+    auto result = std::make_unique<ArrayExpr>(std::move(exprs));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->BREAK())
   {
     if (ctx->expression())
     {
-      return std::make_unique<BreakExpr>(buildExpr(ctx->expression()));
+      auto result = std::make_unique<BreakExpr>(buildExpr(ctx->expression()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<BreakExpr>(nullptr);
+      auto result = std::make_unique<BreakExpr>(nullptr);
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else if (ctx->RETURN())
   {
     if (ctx->expression())
     {
-      return std::make_unique<ReturnExpr>(buildExpr(ctx->expression()));
+      auto result = std::make_unique<ReturnExpr>(buildExpr(ctx->expression()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<ReturnExpr>(nullptr);
+      auto result = std::make_unique<ReturnExpr>(nullptr);
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
   {
-    return std::make_unique<ContinueExpr>();
+    auto result = std::make_unique<ContinueExpr>();
+    result->span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -1128,8 +1611,11 @@ AstBuilder::buildStructExprFields(rx::RxParser::StructExprFieldsContext *ctx)
 StructExprField
 AstBuilder::buildStructExprField(rx::RxParser::StructExprFieldContext *ctx)
 {
-  return StructExprField(ctx->identifier()->getText(),
-                         buildExpr(ctx->expression()));
+  auto result = StructExprField(ctx->identifier()->getText(),
+                                buildExpr(ctx->expression()));
+  result.span_ = spanOf(ctx);
+  result.name_span_ = spanOf(ctx->identifier());
+  return result;
 }
 
 std::unique_ptr<LiteralExpr>
@@ -1137,18 +1623,28 @@ AstBuilder::buildLiteralExpr(rx::RxParser::LiteralExpressionContext *ctx)
 {
   if (ctx->INTEGER_LITERAL())
   {
-    return std::make_unique<LiteralExpr>(
+    auto result = std::make_unique<LiteralExpr>(
         true, true, LiteralStringToInt(ctx->INTEGER_LITERAL()->getText()),
         LiteralStringToIntegerType(ctx->INTEGER_LITERAL()->getText()));
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->FALSE())
   {
-    return std::make_unique<LiteralExpr>(false, false, 0,
-                                         IntegerType::Inferred);
+    auto result =
+        std::make_unique<LiteralExpr>(false, false, 0, IntegerType::Inferred);
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
   else
   {
-    return std::make_unique<LiteralExpr>(false, true, 0, IntegerType::Inferred);
+    auto result =
+        std::make_unique<LiteralExpr>(false, true, 0, IntegerType::Inferred);
+    result->span_ = spanOf(ctx);
+    result->literal_span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -1163,10 +1659,12 @@ std::unique_ptr<Expr> AstBuilder::buildConditionAssignExpr(
 {
   if (ctx->assignmentOperator())
   {
-    return std::make_unique<AssignExpr>(
+    auto result = std::make_unique<AssignExpr>(
         getAssignOperator(ctx->assignmentOperator()),
         buildConditionOrExpr(ctx->conditionLogicalOrExpression()),
         buildConditionExpr(ctx->conditionExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   return buildConditionOrExpr(ctx->conditionLogicalOrExpression());
 }
@@ -1178,9 +1676,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionOrExpr(
       buildConditionAndExpr(ctx->conditionLogicalAndExpression()[0]);
   for (int i = 1; i < ctx->conditionLogicalAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionLogicalAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalOr, std::move(result_ptr),
         buildConditionAndExpr(ctx->conditionLogicalAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1192,9 +1700,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionAndExpr(
       buildConditionCompExpr(ctx->conditionComparisonExpression()[0]);
   for (int i = 1; i < ctx->conditionComparisonExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionComparisonExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalAnd, std::move(result_ptr),
         buildConditionCompExpr(ctx->conditionComparisonExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1204,17 +1722,39 @@ std::unique_ptr<Expr> AstBuilder::buildConditionCompExpr(
 {
   if (ctx->LT())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitOrExpression()[0]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         BinaryOperator::Less,
         buildConditionBitOrExpr(ctx->conditionClosedBitOrExpression()),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()[0]));
+    result->span_ = node_span;
+    return result;
   }
   if (ctx->comparisonExceptLt())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitOrExpression()[1]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         getCompOperator(ctx->comparisonExceptLt()),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()[0]),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()[1]));
+    result->span_ = node_span;
+    return result;
   }
   return buildConditionBitOrExpr(ctx->conditionBitOrExpression()[0]);
 }
@@ -1226,9 +1766,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitOrExpr(
       buildConditionBitXorExpr(ctx->conditionBitXorExpression()[0]);
   for (int i = 1; i < ctx->conditionBitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildConditionBitXorExpr(ctx->conditionBitXorExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1244,13 +1794,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitOrExpr(
       buildConditionBitXorExpr(ctx->conditionBitXorExpression()[0]);
   for (int i = 1; i < ctx->conditionBitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildConditionBitXorExpr(ctx->conditionBitXorExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedBitXorExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitOr, std::move(result_ptr),
       buildConditionBitXorExpr(ctx->conditionClosedBitXorExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 
@@ -1261,9 +1831,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitXorExpr(
       buildConditionBitAndExpr(ctx->conditionBitAndExpression()[0]);
   for (int i = 1; i < ctx->conditionBitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildConditionBitAndExpr(ctx->conditionBitAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1279,13 +1859,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitXorExpr(
       buildConditionBitAndExpr(ctx->conditionBitAndExpression()[0]);
   for (int i = 1; i < ctx->conditionBitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildConditionBitAndExpr(ctx->conditionBitAndExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedBitAndExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitXor, std::move(result_ptr),
       buildConditionBitAndExpr(ctx->conditionClosedBitAndExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 
@@ -1296,9 +1896,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitAndExpr(
       buildConditionShiftExpr(ctx->conditionShiftExpression()[0]);
   for (int i = 1; i < ctx->conditionShiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionShiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildConditionShiftExpr(ctx->conditionShiftExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1314,13 +1924,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBitAndExpr(
       buildConditionShiftExpr(ctx->conditionShiftExpression()[0]);
   for (int i = 1; i < ctx->conditionShiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionShiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildConditionShiftExpr(ctx->conditionShiftExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedShiftExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitAnd, std::move(result_ptr),
       buildConditionShiftExpr(ctx->conditionClosedShiftExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 
@@ -1345,8 +1975,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -1364,8 +2003,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -1394,8 +2042,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -1413,8 +2070,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -1433,9 +2099,18 @@ std::unique_ptr<Expr> AstBuilder::buildConditionAddExpr(
   for (int i = 1; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   return result_expr;
 }
@@ -1455,15 +2130,35 @@ std::unique_ptr<Expr> AstBuilder::buildConditionAddExpr(
   for (int i = 1; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
 
   BinaryOperator last_op = getAddOperator(operators.back());
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedMultiplicativeExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildConditionMultExpr(ctx->conditionClosedMultiplicativeExpression()));
+  result->span_ = node_span;
+  return result;
 }
 
 std::unique_ptr<Expr> AstBuilder::buildConditionMultExpr(
@@ -1475,10 +2170,20 @@ std::unique_ptr<Expr> AstBuilder::buildConditionMultExpr(
         buildConditionCastExpr(ctx->conditionCastExpression()[0]);
     for (int i = 1; i < ctx->conditionCastExpression().size(); i++)
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last =
+          spanOf(ctx->conditionCastExpression()[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<BinaryExpr>(
           getMultOperator(ctx->multiplicativeOperator()[i - 1]),
           std::move(result_expr),
           buildConditionCastExpr(ctx->conditionCastExpression()[i]));
+      result_expr->span_ = node_span;
     }
     return std::move(result_expr);
   }
@@ -1499,14 +2204,34 @@ std::unique_ptr<Expr> AstBuilder::buildConditionMultExpr(
   for (int i = 1; i < cast_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getMultOperator(operators[i - 1]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(cast_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionCastExpr(cast_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   BinaryOperator last_op = getMultOperator(operators[operators.size() - 1]);
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedCastExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildConditionCastExpr(ctx->conditionClosedCastExpression()));
+  result->span_ = node_span;
+  return result;
 }
 
 std::unique_ptr<Expr> AstBuilder::buildConditionCastExpr(
@@ -1518,8 +2243,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionCastExpr(
         buildConditionUnaryExpr(ctx->conditionUnaryExpression());
     for (auto type_ctx : ctx->typeRef())
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(type_ctx->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_ptr = std::make_unique<CastExpr>(std::move(result_ptr),
                                               buildType(type_ctx));
+      result_ptr->span_ = node_span;
     }
     return result_ptr;
   }
@@ -1531,9 +2265,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionCastExpr(
 {
   if (ctx->AS())
   {
-    return std::make_unique<CastExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->closedCastType()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<CastExpr>(
         buildConditionCastExpr(ctx->conditionCastExpression()),
         buildClosedCastType(ctx->closedCastType()));
+    result->span_ = node_span;
+    return result;
   }
   return buildConditionUnaryExpr(ctx->conditionUnaryExpression());
 }
@@ -1547,31 +2291,52 @@ std::unique_ptr<Expr> AstBuilder::buildConditionUnaryExpr(
     auto expr = buildConditionUnaryExpr(ctx->conditionUnaryExpression());
     if (op->MINUS())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
-                                         std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Negate, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->NOT())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->STAR())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
-                                         std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
+                                                std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->AMP())
     {
       UnaryOperator kind =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(kind, std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(kind, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
       UnaryOperator kind_in =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(
-          UnaryOperator::Borrow,
-          std::make_unique<UnaryExpr>(kind_in, std::move(expr)));
+      auto inner_span = spanOf(ctx);
+      if (inner_span && inner_span->begin < inner_span->end)
+      {
+        ++inner_span->begin;
+      }
+      else
+      {
+        inner_span = std::nullopt;
+      }
+      auto inner_node = std::make_unique<UnaryExpr>(kind_in, std::move(expr));
+      inner_node->span_ = inner_span;
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Borrow,
+                                                std::move(inner_node));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
@@ -1595,19 +2360,46 @@ std::unique_ptr<Expr> AstBuilder::buildConditionPostfixExpr(
       {
         arguments.push_back(buildExpr(expr));
       }
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<CallExpr>(std::move(result_expr),
                                                std::move(arguments));
+      result_expr->span_ = node_span;
     }
     else if (postfixs[i]->expression())
     {
       std::unique_ptr<Expr> index_expr = buildExpr(postfixs[i]->expression());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<IndexExpr>(std::move(result_expr),
                                                 std::move(index_expr));
+      result_expr->span_ = node_span;
     }
     else
     {
       result_expr =
           buildDotSuffix(std::move(result_expr), postfixs[i]->dotSuffix());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
+      result_expr->span_ = node_span;
     }
   }
   return result_expr;
@@ -1646,7 +2438,9 @@ std::unique_ptr<Expr> AstBuilder::buildConditionPrimaryExprWithoutBareBlock(
     }
     else
     {
-      return std::make_unique<UnitExpr>();
+      auto result = std::make_unique<UnitExpr>();
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else if (ctx->arrayExpression())
@@ -1659,41 +2453,56 @@ std::unique_ptr<Expr> AstBuilder::buildConditionPrimaryExprWithoutBareBlock(
   }
   else if (ctx->LOOP())
   {
-    return std::make_unique<LoopExpr>(buildBlockExpr(ctx->blockExpression()));
+    auto result =
+        std::make_unique<LoopExpr>(buildBlockExpr(ctx->blockExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->WHILE())
   {
-    return std::make_unique<WhileExpr>(
+    auto result = std::make_unique<WhileExpr>(
         buildConditionExpr(ctx->conditionExpression()),
         buildBlockExpr(ctx->blockExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->BREAK())
   {
     if (ctx->conditionBreakExpression())
     {
-      return std::make_unique<BreakExpr>(
+      auto result = std::make_unique<BreakExpr>(
           buildConditionBreakExpr(ctx->conditionBreakExpression()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<BreakExpr>(nullptr);
+      auto result = std::make_unique<BreakExpr>(nullptr);
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else if (ctx->RETURN())
   {
     if (ctx->conditionExpression())
     {
-      return std::make_unique<ReturnExpr>(
+      auto result = std::make_unique<ReturnExpr>(
           buildConditionExpr(ctx->conditionExpression()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<ReturnExpr>(nullptr);
+      auto result = std::make_unique<ReturnExpr>(nullptr);
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
   {
-    return std::make_unique<ContinueExpr>();
+    auto result = std::make_unique<ContinueExpr>();
+    result->span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -1704,8 +2513,10 @@ AstBuilder::buildArrayExpr(rx::RxParser::ArrayExpressionContext *ctx)
   {
     if (ctx->SEMI())
     {
-      return std::make_unique<ArrayExpr>(buildExpr(ctx->expression()[0]),
-                                         buildConstValue(ctx->constValue()));
+      auto result = std::make_unique<ArrayExpr>(
+          buildExpr(ctx->expression()[0]), buildConstValue(ctx->constValue()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
@@ -1714,10 +2525,15 @@ AstBuilder::buildArrayExpr(rx::RxParser::ArrayExpressionContext *ctx)
       {
         exprs.push_back(std::move(buildExpr(expr_ctx)));
       }
-      return std::make_unique<ArrayExpr>(std::move(exprs));
+      auto result = std::make_unique<ArrayExpr>(std::move(exprs));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
-  return std::make_unique<ArrayExpr>(std::vector<std::unique_ptr<Expr>>());
+  auto result =
+      std::make_unique<ArrayExpr>(std::vector<std::unique_ptr<Expr>>());
+  result->span_ = spanOf(ctx);
+  return result;
 }
 std::unique_ptr<IfExpr>
 AstBuilder::buildIfExpr(rx::RxParser::IfExpressionContext *ctx)
@@ -1729,21 +2545,27 @@ AstBuilder::buildIfExpr(rx::RxParser::IfExpressionContext *ctx)
   {
     if (ctx->blockExpression().size() == 2)
     {
-      return std::make_unique<IfExpr>(
+      auto result = std::make_unique<IfExpr>(
           std::move(condition_ptr), std::move(block_ptr), true, false,
           buildBlockExpr(ctx->blockExpression()[1]), nullptr);
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
-      return std::make_unique<IfExpr>(std::move(condition_ptr),
-                                      std::move(block_ptr), true, true, nullptr,
-                                      buildIfExpr(ctx->ifExpression()));
+      auto result = std::make_unique<IfExpr>(
+          std::move(condition_ptr), std::move(block_ptr), true, true, nullptr,
+          buildIfExpr(ctx->ifExpression()));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
   {
-    return std::make_unique<IfExpr>(std::move(condition_ptr),
-                                    std::move(block_ptr));
+    auto result = std::make_unique<IfExpr>(std::move(condition_ptr),
+                                           std::move(block_ptr));
+    result->span_ = spanOf(ctx);
+    return result;
   }
 }
 
@@ -1758,10 +2580,12 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakAssignExpr(
 {
   if (ctx->assignmentOperator())
   {
-    return std::make_unique<AssignExpr>(
+    auto result = std::make_unique<AssignExpr>(
         getAssignOperator(ctx->assignmentOperator()),
         buildConditionBreakOrExpr(ctx->conditionBreakLogicalOrExpression()),
         buildConditionExpr(ctx->conditionExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   return buildConditionBreakOrExpr(ctx->conditionBreakLogicalOrExpression());
 }
@@ -1772,9 +2596,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakOrExpr(
       buildConditionBreakAndExpr(ctx->conditionBreakLogicalAndExpression());
   for (int i = 0; i < ctx->conditionLogicalAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionLogicalAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalOr, std::move(result_ptr),
         buildConditionAndExpr(ctx->conditionLogicalAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1785,9 +2619,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakAndExpr(
       buildConditionBreakCompExpr(ctx->conditionBreakComparisonExpression());
   for (int i = 0; i < ctx->conditionComparisonExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionComparisonExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalAnd, std::move(result_ptr),
         buildConditionCompExpr(ctx->conditionComparisonExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1796,18 +2640,40 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakCompExpr(
 {
   if (ctx->LT())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitOrExpression()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         BinaryOperator::Less,
         buildConditionBreakBitOrExpr(
             ctx->conditionBreakClosedBitOrExpression()),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()));
+    result->span_ = node_span;
+    return result;
   }
   if (ctx->comparisonExceptLt())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitOrExpression()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         getCompOperator(ctx->comparisonExceptLt()),
         buildConditionBreakBitOrExpr(ctx->conditionBreakBitOrExpression()),
         buildConditionBitOrExpr(ctx->conditionBitOrExpression()));
+    result->span_ = node_span;
+    return result;
   }
   return buildConditionBreakBitOrExpr(ctx->conditionBreakBitOrExpression());
 }
@@ -1818,9 +2684,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitOrExpr(
       buildConditionBreakBitXorExpr(ctx->conditionBreakBitXorExpression());
   for (int i = 0; i < ctx->conditionBitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildConditionBitXorExpr(ctx->conditionBitXorExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1836,13 +2712,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitOrExpr(
       buildConditionBreakBitXorExpr(ctx->conditionBreakBitXorExpression());
   for (int i = 0; i < ctx->conditionBitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildConditionBitXorExpr(ctx->conditionBitXorExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedBitXorExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitOr, std::move(result_ptr),
       buildConditionBitXorExpr(ctx->conditionClosedBitXorExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitXorExpr(
@@ -1852,9 +2748,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitXorExpr(
       buildConditionBreakBitAndExpr(ctx->conditionBreakBitAndExpression());
   for (int i = 0; i < ctx->conditionBitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildConditionBitAndExpr(ctx->conditionBitAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1870,13 +2776,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitXorExpr(
       buildConditionBreakBitAndExpr(ctx->conditionBreakBitAndExpression());
   for (int i = 0; i < ctx->conditionBitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionBitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildConditionBitAndExpr(ctx->conditionBitAndExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedBitAndExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitXor, std::move(result_ptr),
       buildConditionBitAndExpr(ctx->conditionClosedBitAndExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitAndExpr(
@@ -1886,9 +2812,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitAndExpr(
       buildConditionBreakShiftExpr(ctx->conditionBreakShiftExpression());
   for (int i = 0; i < ctx->conditionShiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionShiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildConditionShiftExpr(ctx->conditionShiftExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -1904,13 +2840,33 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakBitAndExpr(
       buildConditionBreakShiftExpr(ctx->conditionBreakShiftExpression());
   for (int i = 0; i < ctx->conditionShiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->conditionShiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildConditionShiftExpr(ctx->conditionShiftExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedShiftExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitAnd, std::move(result_ptr),
       buildConditionShiftExpr(ctx->conditionClosedShiftExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
@@ -1934,8 +2890,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -1954,8 +2919,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -1973,8 +2947,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -1992,8 +2975,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2021,8 +3013,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2041,8 +3042,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2060,8 +3070,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2079,8 +3098,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2099,9 +3127,18 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakAddExpr(
   for (int i = 0; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   return result_expr;
 }
@@ -2120,15 +3157,35 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakAddExpr(
   for (int i = 0; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
 
   BinaryOperator last_op = getAddOperator(operators.back());
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedMultiplicativeExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildConditionMultExpr(ctx->conditionClosedMultiplicativeExpression()));
+  result->span_ = node_span;
+  return result;
 }
 std::unique_ptr<Expr> AstBuilder::buildConditionBreakMultExpr(
     rx::RxParser::ConditionBreakMultiplicativeExpressionContext *ctx)
@@ -2139,10 +3196,20 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakMultExpr(
         buildConditionBreakCastExpr(ctx->conditionBreakCastExpression());
     for (int i = 0; i < ctx->conditionCastExpression().size(); i++)
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last =
+          spanOf(ctx->conditionCastExpression()[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<BinaryExpr>(
           getMultOperator(ctx->multiplicativeOperator()[i]),
           std::move(result_expr),
           buildConditionCastExpr(ctx->conditionCastExpression()[i]));
+      result_expr->span_ = node_span;
     }
     return std::move(result_expr);
   }
@@ -2163,14 +3230,34 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakMultExpr(
   for (int i = 0; i < cast_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getMultOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(cast_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr),
         buildConditionCastExpr(cast_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   BinaryOperator last_op = getMultOperator(operators[operators.size() - 1]);
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->conditionClosedCastExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildConditionCastExpr(ctx->conditionClosedCastExpression()));
+  result->span_ = node_span;
+  return result;
 }
 std::unique_ptr<Expr> AstBuilder::buildConditionBreakCastExpr(
     rx::RxParser::ConditionBreakCastExpressionContext *ctx)
@@ -2181,8 +3268,17 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakCastExpr(
         buildConditionBreakUnaryExpr(ctx->conditionBreakUnaryExpression());
     for (auto type_ctx : ctx->typeRef())
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(type_ctx->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_ptr = std::make_unique<CastExpr>(std::move(result_ptr),
                                               buildType(type_ctx));
+      result_ptr->span_ = node_span;
     }
     return std::move(result_ptr);
   }
@@ -2193,9 +3289,19 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakCastExpr(
 {
   if (ctx->AS())
   {
-    return std::make_unique<CastExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->closedCastType()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<CastExpr>(
         buildConditionBreakCastExpr(ctx->conditionBreakCastExpression()),
         buildClosedCastType(ctx->closedCastType()));
+    result->span_ = node_span;
+    return result;
   }
   return buildConditionBreakUnaryExpr(ctx->conditionBreakUnaryExpression());
 }
@@ -2208,31 +3314,52 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakUnaryExpr(
     auto expr = buildConditionUnaryExpr(ctx->conditionUnaryExpression());
     if (op->MINUS())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
-                                         std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Negate, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->NOT())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->STAR())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
-                                         std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
+                                                std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->AMP())
     {
       UnaryOperator kind =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(kind, std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(kind, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
       UnaryOperator kind_in =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(
-          UnaryOperator::Borrow,
-          std::make_unique<UnaryExpr>(kind_in, std::move(expr)));
+      auto inner_span = spanOf(ctx);
+      if (inner_span && inner_span->begin < inner_span->end)
+      {
+        ++inner_span->begin;
+      }
+      else
+      {
+        inner_span = std::nullopt;
+      }
+      auto inner_node = std::make_unique<UnaryExpr>(kind_in, std::move(expr));
+      inner_node->span_ = inner_span;
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Borrow,
+                                                std::move(inner_node));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
@@ -2256,19 +3383,46 @@ std::unique_ptr<Expr> AstBuilder::buildConditionBreakPostfixExpr(
       {
         arguments.push_back(buildExpr(expr));
       }
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<CallExpr>(std::move(result_expr),
                                                std::move(arguments));
+      result_expr->span_ = node_span;
     }
     else if (postfixs[i]->expression())
     {
       std::unique_ptr<Expr> index_expr = buildExpr(postfixs[i]->expression());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<IndexExpr>(std::move(result_expr),
                                                 std::move(index_expr));
+      result_expr->span_ = node_span;
     }
     else
     {
       result_expr =
           buildDotSuffix(std::move(result_expr), postfixs[i]->dotSuffix());
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(postfixs[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
+      result_expr->span_ = node_span;
     }
   }
   return result_expr;
@@ -2284,10 +3438,12 @@ std::unique_ptr<Expr> AstBuilder::buildStmtAssignExpr(
 {
   if (ctx->assignmentOperator())
   {
-    return std::make_unique<AssignExpr>(
+    auto result = std::make_unique<AssignExpr>(
         getAssignOperator(ctx->assignmentOperator()),
         buildStmtOrExpr(ctx->statementLogicalOrExpression()),
         buildExpr(ctx->expression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   return buildStmtOrExpr(ctx->statementLogicalOrExpression());
 }
@@ -2298,9 +3454,19 @@ std::unique_ptr<Expr> AstBuilder::buildStmtOrExpr(
       buildStmtAndExpr(ctx->statementLogicalAndExpression());
   for (int i = 0; i < ctx->logicalAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->logicalAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalOr, std::move(result_ptr),
         buildAndExpr(ctx->logicalAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -2311,9 +3477,19 @@ std::unique_ptr<Expr> AstBuilder::buildStmtAndExpr(
       buildStmtCompExpr(ctx->statementComparisonExpression());
   for (int i = 0; i < ctx->comparisonExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last =
+        spanOf(ctx->comparisonExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::LogicalAnd, std::move(result_ptr),
         buildCompExpr(ctx->comparisonExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -2322,17 +3498,37 @@ std::unique_ptr<Expr> AstBuilder::buildStmtCompExpr(
 {
   if (ctx->LT())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitOrExpression()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         BinaryOperator::Less,
         buildStmtBitOrExpr(ctx->statementClosedBitOrExpression()),
         buildBitOrExpr(ctx->bitOrExpression()));
+    result->span_ = node_span;
+    return result;
   }
   if (ctx->comparisonExceptLt())
   {
-    return std::make_unique<BinaryExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitOrExpression()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<BinaryExpr>(
         getCompOperator(ctx->comparisonExceptLt()),
         buildStmtBitOrExpr(ctx->statementBitOrExpression()),
         buildBitOrExpr(ctx->bitOrExpression()));
+    result->span_ = node_span;
+    return result;
   }
   return buildStmtBitOrExpr(ctx->statementBitOrExpression());
 }
@@ -2343,9 +3539,18 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitOrExpr(
       buildStmtBitXorExpr(ctx->statementBitXorExpression());
   for (int i = 0; i < ctx->bitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildBitXorExpr(ctx->bitXorExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -2360,13 +3565,31 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitOrExpr(
       buildStmtBitXorExpr(ctx->statementBitXorExpression());
   for (int i = 0; i < ctx->bitXorExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitXorExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitOr, std::move(result_ptr),
         buildBitXorExpr(ctx->bitXorExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedBitXorExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitOr, std::move(result_ptr),
       buildBitXorExpr(ctx->closedBitXorExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildStmtBitXorExpr(
@@ -2376,9 +3599,18 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitXorExpr(
       buildStmtBitAndExpr(ctx->statementBitAndExpression());
   for (int i = 0; i < ctx->bitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildBitAndExpr(ctx->bitAndExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -2393,13 +3625,31 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitXorExpr(
       buildStmtBitAndExpr(ctx->statementBitAndExpression());
   for (int i = 0; i < ctx->bitAndExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->bitAndExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitXor, std::move(result_ptr),
         buildBitAndExpr(ctx->bitAndExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedBitAndExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitXor, std::move(result_ptr),
       buildBitAndExpr(ctx->closedBitAndExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildStmtBitAndExpr(
@@ -2409,9 +3659,18 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitAndExpr(
       buildStmtShiftExpr(ctx->statementShiftExpression());
   for (int i = 0; i < ctx->shiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->shiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildShiftExpr(ctx->shiftExpression()[i]));
+    result_ptr->span_ = node_span;
   }
   return result_ptr;
 }
@@ -2426,13 +3685,31 @@ std::unique_ptr<Expr> AstBuilder::buildStmtBitAndExpr(
       buildStmtShiftExpr(ctx->statementShiftExpression());
   for (int i = 0; i < ctx->shiftExpression().size(); i++)
   {
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->shiftExpression()[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_ptr = std::make_unique<BinaryExpr>(
         BinaryOperator::BitAnd, std::move(result_ptr),
         buildShiftExpr(ctx->shiftExpression()[i]));
+    result_ptr->span_ = node_span;
+  }
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedShiftExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
   }
   result_ptr = std::make_unique<BinaryExpr>(
       BinaryOperator::BitAnd, std::move(result_ptr),
       buildShiftExpr(ctx->closedShiftExpression()));
+  result_ptr->span_ = node_span;
   return result_ptr;
 }
 std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
@@ -2456,8 +3733,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2475,8 +3761,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2494,8 +3789,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2513,8 +3817,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2542,8 +3855,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2561,8 +3883,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2580,8 +3911,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftRight;
       }
     }
@@ -2599,8 +3939,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtShiftExpr(
       }
       else
       {
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(add_expr_ctx->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_ptr = std::make_unique<BinaryExpr>(now_op, std::move(result_ptr),
                                                   std::move(add_expr));
+        result_ptr->span_ = node_span;
         now_op = BinaryOperator::ShiftLeft;
       }
     }
@@ -2618,8 +3967,17 @@ std::unique_ptr<Expr> AstBuilder::buildStmtAddExpr(
   for (int i = 0; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   return result_expr;
 }
@@ -2637,14 +3995,34 @@ std::unique_ptr<Expr> AstBuilder::buildStmtAddExpr(
   for (int i = 0; i < mult_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getAddOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(mult_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildMultExpr(mult_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
 
   BinaryOperator last_op = getAddOperator(operators.back());
-  return std::make_unique<BinaryExpr>(
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last =
+      spanOf(ctx->closedMultiplicativeExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result = std::make_unique<BinaryExpr>(
       last_op, std::move(result_expr),
       buildMultExpr(ctx->closedMultiplicativeExpression()));
+  result->span_ = node_span;
+  return result;
 }
 std::unique_ptr<Expr> AstBuilder::buildStmtMultExpr(
     rx::RxParser::StatementMultiplicativeExpressionContext *ctx)
@@ -2655,9 +4033,18 @@ std::unique_ptr<Expr> AstBuilder::buildStmtMultExpr(
         buildStmtCastExpr(ctx->statementCastExpression());
     for (int i = 0; i < ctx->castExpression().size(); i++)
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(ctx->castExpression()[i]->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_expr = std::make_unique<BinaryExpr>(
           getMultOperator(ctx->multiplicativeOperator()[i]),
           std::move(result_expr), buildCastExpr(ctx->castExpression()[i]));
+      result_expr->span_ = node_span;
     }
     return std::move(result_expr);
   }
@@ -2677,13 +4064,32 @@ std::unique_ptr<Expr> AstBuilder::buildStmtMultExpr(
   for (int i = 0; i < cast_expr_contexts.size(); ++i)
   {
     BinaryOperator op = getMultOperator(operators[i]);
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(cast_expr_contexts[i]->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
     result_expr = std::make_unique<BinaryExpr>(
         op, std::move(result_expr), buildCastExpr(cast_expr_contexts[i]));
+    result_expr->span_ = node_span;
   }
   BinaryOperator last_op = getMultOperator(operators[operators.size() - 1]);
-  return std::make_unique<BinaryExpr>(
-      last_op, std::move(result_expr),
-      buildCastExpr(ctx->closedCastExpression()));
+  const auto node_span_first = spanOf(ctx->getStart());
+  const auto node_span_last = spanOf(ctx->closedCastExpression()->getStop());
+  std::optional<SourceSpan> node_span;
+  if (node_span_first && node_span_last &&
+      node_span_last->end >= node_span_first->begin)
+  {
+    node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+  }
+  auto result =
+      std::make_unique<BinaryExpr>(last_op, std::move(result_expr),
+                                   buildCastExpr(ctx->closedCastExpression()));
+  result->span_ = node_span;
+  return result;
 }
 std::unique_ptr<Expr>
 AstBuilder::buildStmtCastExpr(rx::RxParser::StatementCastExpressionContext *ctx)
@@ -2694,8 +4100,17 @@ AstBuilder::buildStmtCastExpr(rx::RxParser::StatementCastExpressionContext *ctx)
         buildStmtUnaryExpr(ctx->statementUnaryExpression());
     for (auto type_ctx : ctx->typeRef())
     {
+      const auto node_span_first = spanOf(ctx->getStart());
+      const auto node_span_last = spanOf(type_ctx->getStop());
+      std::optional<SourceSpan> node_span;
+      if (node_span_first && node_span_last &&
+          node_span_last->end >= node_span_first->begin)
+      {
+        node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+      }
       result_ptr = std::make_unique<CastExpr>(std::move(result_ptr),
                                               buildType(type_ctx));
+      result_ptr->span_ = node_span;
     }
     return std::move(result_ptr);
   }
@@ -2706,9 +4121,19 @@ std::unique_ptr<Expr> AstBuilder::buildStmtCastExpr(
 {
   if (ctx->AS())
   {
-    return std::make_unique<CastExpr>(
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->closedCastType()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    auto result = std::make_unique<CastExpr>(
         buildStmtCastExpr(ctx->statementCastExpression()),
         buildClosedCastType(ctx->closedCastType()));
+    result->span_ = node_span;
+    return result;
   }
   return buildStmtUnaryExpr(ctx->statementUnaryExpression());
 }
@@ -2721,31 +4146,52 @@ std::unique_ptr<Expr> AstBuilder::buildStmtUnaryExpr(
     auto expr = buildUnaryExpr(ctx->unaryExpression());
     if (op->MINUS())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Negate,
-                                         std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Negate, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->NOT())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      auto result =
+          std::make_unique<UnaryExpr>(UnaryOperator::Not, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->STAR())
     {
-      return std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
-                                         std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Dereference,
+                                                std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else if (op->AMP())
     {
       UnaryOperator kind =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(kind, std::move(expr));
+      auto result = std::make_unique<UnaryExpr>(kind, std::move(expr));
+      result->span_ = spanOf(ctx);
+      return result;
     }
     else
     {
       UnaryOperator kind_in =
           op->MUT() ? UnaryOperator::BorrowMut : UnaryOperator::Borrow;
-      return std::make_unique<UnaryExpr>(
-          UnaryOperator::Borrow,
-          std::make_unique<UnaryExpr>(kind_in, std::move(expr)));
+      auto inner_span = spanOf(ctx);
+      if (inner_span && inner_span->begin < inner_span->end)
+      {
+        ++inner_span->begin;
+      }
+      else
+      {
+        inner_span = std::nullopt;
+      }
+      auto inner_node = std::make_unique<UnaryExpr>(kind_in, std::move(expr));
+      inner_node->span_ = inner_span;
+      auto result = std::make_unique<UnaryExpr>(UnaryOperator::Borrow,
+                                                std::move(inner_node));
+      result->span_ = spanOf(ctx);
+      return result;
     }
   }
   else
@@ -2770,19 +4216,46 @@ std::unique_ptr<Expr> AstBuilder::buildStmtPostfixExpr(
         {
           arguments.push_back(buildExpr(expr));
         }
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_expr = std::make_unique<CallExpr>(std::move(result_expr),
                                                  std::move(arguments));
+        result_expr->span_ = node_span;
       }
       else if (postfixs[i]->expression())
       {
         std::unique_ptr<Expr> index_expr = buildExpr(postfixs[i]->expression());
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_expr = std::make_unique<IndexExpr>(std::move(result_expr),
                                                   std::move(index_expr));
+        result_expr->span_ = node_span;
       }
       else
       {
         result_expr =
             buildDotSuffix(std::move(result_expr), postfixs[i]->dotSuffix());
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
+        result_expr->span_ = node_span;
       }
     }
     return result_expr;
@@ -2792,6 +4265,15 @@ std::unique_ptr<Expr> AstBuilder::buildStmtPostfixExpr(
     std::unique_ptr<Expr> result_expr =
         buildExprWithBlock(ctx->expressionWithBlock());
     result_expr = buildDotSuffix(std::move(result_expr), ctx->dotSuffix());
+    const auto node_span_first = spanOf(ctx->getStart());
+    const auto node_span_last = spanOf(ctx->dotSuffix()->getStop());
+    std::optional<SourceSpan> node_span;
+    if (node_span_first && node_span_last &&
+        node_span_last->end >= node_span_first->begin)
+    {
+      node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+    }
+    result_expr->span_ = node_span;
     auto postfixs = ctx->postfixSuffix();
     for (int i = 0; i < postfixs.size(); i++)
     {
@@ -2802,19 +4284,46 @@ std::unique_ptr<Expr> AstBuilder::buildStmtPostfixExpr(
         {
           arguments.push_back(buildExpr(expr));
         }
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_expr = std::make_unique<CallExpr>(std::move(result_expr),
                                                  std::move(arguments));
+        result_expr->span_ = node_span;
       }
       else if (postfixs[i]->expression())
       {
         std::unique_ptr<Expr> index_expr = buildExpr(postfixs[i]->expression());
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
         result_expr = std::make_unique<IndexExpr>(std::move(result_expr),
                                                   std::move(index_expr));
+        result_expr->span_ = node_span;
       }
       else
       {
         result_expr =
             buildDotSuffix(std::move(result_expr), postfixs[i]->dotSuffix());
+        const auto node_span_first = spanOf(ctx->getStart());
+        const auto node_span_last = spanOf(postfixs[i]->getStop());
+        std::optional<SourceSpan> node_span;
+        if (node_span_first && node_span_last &&
+            node_span_last->end >= node_span_first->begin)
+        {
+          node_span = SourceSpan{node_span_first->begin, node_span_last->end};
+        }
+        result_expr->span_ = node_span;
       }
     }
     return result_expr;
@@ -2829,13 +4338,18 @@ AstBuilder::buildExprWithBlock(rx::RxParser::ExpressionWithBlockContext *ctx)
   }
   else if (ctx->LOOP())
   {
-    return std::make_unique<LoopExpr>(buildBlockExpr(ctx->blockExpression()));
+    auto result =
+        std::make_unique<LoopExpr>(buildBlockExpr(ctx->blockExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else if (ctx->WHILE())
   {
-    return std::make_unique<WhileExpr>(
+    auto result = std::make_unique<WhileExpr>(
         buildConditionExpr(ctx->conditionExpression()),
         buildBlockExpr(ctx->blockExpression()));
+    result->span_ = spanOf(ctx);
+    return result;
   }
   else
   {

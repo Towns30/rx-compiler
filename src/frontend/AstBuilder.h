@@ -14,6 +14,10 @@ public:
   std::unique_ptr<Crate> Build(rx::RxParser::CrateContext *ctx);
 
 private:
+  static std::optional<SourceSpan> spanOf(const antlr4::Token *token);
+  static std::optional<SourceSpan> spanOf(const antlr4::ParserRuleContext *ctx);
+  static SourceSpan cover(SourceSpan first, SourceSpan last);
+
   std::unique_ptr<Crate> buildCrate(rx::RxParser::CrateContext *ctx);
   std::unique_ptr<Item> buildItem(rx::RxParser::ItemContext *ctx);
   std::unique_ptr<Stmt> buildStmt(rx::RxParser::StatementContext *ctx);
