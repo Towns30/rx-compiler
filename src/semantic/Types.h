@@ -94,23 +94,23 @@ public:
   TypeKind kind() const override { return TypeKind::Array; }
 };
 
-class BoxType : public SemType
+class BoxSemType : public SemType
 {
 public:
   TypeId element_type_id_;
 
-  explicit BoxType(TypeId element_type_id)
+  explicit BoxSemType(TypeId element_type_id)
       : element_type_id_(element_type_id) {}
 
   TypeKind kind() const override { return TypeKind::Box; }
 };
 
-class VecType : public SemType
+class VecSemType : public SemType
 {
 public:
   TypeId element_type_id_;
 
-  explicit VecType(TypeId element_type_id)
+  explicit VecSemType(TypeId element_type_id)
       : element_type_id_(element_type_id) {}
 
   TypeKind kind() const override { return TypeKind::Vec; }

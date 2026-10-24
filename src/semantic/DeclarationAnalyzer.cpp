@@ -26,7 +26,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       std::size_t const_id = semantic_ctx.constants_.size();
-      auto [it, inserted] = semantic_ctx.func_const_ident_to_id.emplace(
+      auto [it, inserted] = semantic_ctx.func_const_name_to_id.emplace(
           const_item->ident_,
           FuncConstSymbol{.kind_ = ValueKind::Constant, .index_ = const_id});
       if (!inserted)
@@ -34,7 +34,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       semantic_ctx.constants_.push_back(
-          ConstInfo{.ident_ = const_item->ident_, .declaration_ = const_item});
+          ConstInfo{.name_ = const_item->ident_, .declaration_ = const_item});
     }
     else if (auto struct_item = dynamic_cast<const StructItem *>(item.get()))
     {
@@ -43,14 +43,14 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       StructId struct_id = semantic_ctx.structs_.size();
-      auto [it, inserted] = semantic_ctx.struct_ident_to_id_.emplace(
+      auto [it, inserted] = semantic_ctx.struct_name_to_id_.emplace(
           struct_item->ident_, struct_id);
       if (!inserted)
       {
         return false;
       }
       semantic_ctx.structs_.push_back(
-          StructInfo{.ident_ = struct_item->ident_,
+          StructInfo{.name_ = struct_item->ident_,
                      .derives_ = struct_item->derives_,
                      .declaration_ = struct_item});
     }
@@ -61,7 +61,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       std::size_t func_id = semantic_ctx.functions_.size();
-      auto [it, inserted] = semantic_ctx.func_const_ident_to_id.emplace(
+      auto [it, inserted] = semantic_ctx.func_const_name_to_id.emplace(
           func_item->ident_,
           FuncConstSymbol{.kind_ = ValueKind::Function, .index_ = func_id});
       if (!inserted)
@@ -69,7 +69,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       semantic_ctx.functions_.push_back(
-          FuncInfo{.ident_ = func_item->ident_, .declaration_ = func_item});
+          FuncInfo{.name_ = func_item->ident_, .declaration_ = func_item});
     }
     else if (auto impl_item = dynamic_cast<const ImplItem *>(item.get()))
     {
@@ -93,12 +93,12 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
       return false;
     }
     // 确定impl的结构体名字已经声明
-    if (semantic_ctx.struct_ident_to_id_.find(struct_name) ==
-        semantic_ctx.struct_ident_to_id_.end())
+    if (semantic_ctx.struct_name_to_id_.find(struct_name) ==
+        semantic_ctx.struct_name_to_id_.end())
     {
       return false;
     }
-    StructId owner_struct_id = semantic_ctx.struct_ident_to_id_.at(struct_name);
+    StructId owner_struct_id = semantic_ctx.struct_name_to_id_.at(struct_name);
     StructInfo &owner_struct_info = semantic_ctx.structs_[owner_struct_id];
     for (auto &item : impl_item->items_)
     {
@@ -114,7 +114,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
           return false;
         }
         semantic_ctx.constants_.push_back(
-            ConstInfo{.ident_ = const_item->ident_,
+            ConstInfo{.name_ = const_item->ident_,
                       .owner_struct_id_ = owner_struct_id,
                       .declaration_ = const_item});
       }
@@ -130,7 +130,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
           return false;
         }
         semantic_ctx.functions_.push_back(
-            FuncInfo{.ident_ = func_item->ident_,
+            FuncInfo{.name_ = func_item->ident_,
                       .owner_struct_id_ = owner_struct_id,
                       .declaration_ = func_item});
       }

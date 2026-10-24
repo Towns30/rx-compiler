@@ -1,12 +1,20 @@
 #pragma once
 #include "Types.h"
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
 #include <unordered_map>
 
-using ConstValue = std::variant<std::uint64_t, std::int64_t, bool>;
+using ConstValue = std::variant<std::int64_t, bool>;
+
+enum class ConstEvaluateStatus
+{
+  Wait,
+  Evaluating,
+  Done
+};
 
 enum class ValueKind
 {
@@ -23,14 +31,14 @@ struct FuncConstSymbol
 class FieldInfo
 {
 public:
-  std::string ident_;
+  std::string name_;
   TypeId type_id_;
 };
 
 class VarInfo
 {
 public:
-  std::string ident_;
+  std::string name_;
   TypeId type_id_;
   bool mut_;
 };
@@ -38,7 +46,7 @@ public:
 class FuncInfo
 {
 public:
-  std::string ident_;
+  std::string name_;
   std::vector<TypeId> args_type_id_;
   TypeId return_type_id_;
   std::optional<SelfParam> self_param_;
@@ -49,7 +57,8 @@ public:
 class StructInfo
 {
 public:
-  std::string ident_;
+  std::string name_;
+  std::optional<TypeId> type_id_;
   std::vector<FieldInfo> members_;
   std::vector<DeriveKind> derives_;
   std::unordered_map<std::string, FuncConstSymbol> associate_items_;
@@ -59,9 +68,10 @@ public:
 class ConstInfo
 {
 public:
-  std::string ident_;
-  TypeId type_id_;
+  std::string name_;
+  std::optional<TypeId> type_id_ = std::nullopt;
   std::optional<StructId> owner_struct_id_;
   std::optional<ConstValue> value_;
+  ConstEvaluateStatus status_;
   const ConstItem *declaration_ = nullptr;
 };
