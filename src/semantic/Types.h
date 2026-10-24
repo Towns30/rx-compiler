@@ -86,9 +86,9 @@ class ArraySemType : public SemType
 {
 public:
   TypeId element_type_id_;
-  std::uint32_t length_;
+  std::int64_t length_;
 
-  ArraySemType(TypeId element_type_id, std::uint32_t length)
+  ArraySemType(TypeId element_type_id, std::int64_t length)
       : element_type_id_(element_type_id), length_(length) {}
 
   TypeKind kind() const override { return TypeKind::Array; }

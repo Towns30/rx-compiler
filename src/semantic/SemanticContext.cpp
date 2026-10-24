@@ -98,7 +98,7 @@ TypeId SemanticContext::getOrCreateReferenceTypeId(TypeId inner_type_id, bool mu
 }
 
 TypeId SemanticContext::getOrCreateArrayTypeId(TypeId element_type_id,
-                                             std::uint32_t len)
+                                             std::int64_t len)
 {
   ArraySemType array_type(element_type_id, len);
   if (auto type_id = getArrayTypeId(array_type))

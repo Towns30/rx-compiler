@@ -15,7 +15,7 @@ public:
   std::optional<TypeId> getStructTypeId(const std::string& name);
   std::optional<TypeId> getStructTypeId(const StructId& struct_id);
   TypeId getOrCreateReferenceTypeId(TypeId inner_type_id, bool mut);
-  TypeId getOrCreateArrayTypeId(TypeId element_type_id, std::uint32_t len);
+  TypeId getOrCreateArrayTypeId(TypeId element_type_id, std::int64_t len);
   TypeId getOrCreateBoxTypeId(TypeId element_type_id);
   TypeId getOrCreateVecTypeId(TypeId element_type_id);
 

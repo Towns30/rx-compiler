@@ -6,6 +6,7 @@
 #include "RxLexer.h"
 #include "RxParser.h"
 #include "frontend/AstBuilder.h"
+#include "semantic/SemanticAnalyzer.h"
 
 void printTree(antlr4::tree::ParseTree *node, const rx::RxParser &parser,
                int depth = 0)
@@ -53,5 +54,11 @@ int main(int argc, char *argv[])
   AstBuilder ast_builder;
   // printTree(tree, parser);
   auto ast_tree = ast_builder.Build(tree);
-  ast_tree->print(0);
+  SemanticAnalyzer semantic_analyzer;
+  SemanticContext semantic_context;
+  if (!semantic_analyzer.SemanticCheck(*(ast_tree.get()), semantic_context))
+  {
+    return 1;
+  }
+  return 0;
 }
