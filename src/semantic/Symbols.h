@@ -16,6 +16,13 @@ enum class ConstEvaluateStatus
   Done
 };
 
+enum class VisitState
+{
+  Unvisited,
+  Visiting,
+  Done
+};
+
 enum class ValueKind
 {
     Function,

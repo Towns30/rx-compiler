@@ -23,5 +23,9 @@ bool SemanticAnalyzer::SemanticCheck(const Crate &crate, SemanticContext& semant
   {
     return false;
   }
+  if (!type_resolver.checkStructCycle(semantic_ctx))
+  {
+    return false;
+  }
   return true;
 }

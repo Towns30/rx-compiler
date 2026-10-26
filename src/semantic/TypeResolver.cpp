@@ -201,3 +201,59 @@ bool TypeResolver::resolveFuncStructTypes(SemanticContext &semantic_ctx)
   }
   return true;
 }
+
+bool TypeResolver::checkStructCycle(SemanticContext &semantic_ctx)
+{
+  std::vector<VisitState> states(semantic_ctx.structs_.size(),
+                                 VisitState::Unvisited);
+  for (int i = 0; i < semantic_ctx.structs_.size(); i++)
+  {
+    if (!checkStruct(semantic_ctx, states, i))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+bool TypeResolver::checkStruct(SemanticContext &semantic_context,
+                               std::vector<VisitState> &states,
+                               StructId struct_id)
+{
+  if (states[struct_id] == VisitState::Done)
+  {
+    return true;
+  }
+  if (states[struct_id] == VisitState::Visiting)
+  {
+    return false;
+  }
+  states[struct_id] = VisitState::Visiting;
+  auto struct_info = semantic_context.structs_[struct_id];
+  for (auto struct_field : struct_info.members_)
+  {
+    if (!checkType(semantic_context, states, struct_field.type_id_))
+    {
+      return false;
+    }
+  }
+  states[struct_id] = VisitState::Done;
+  return true;
+}
+bool TypeResolver::checkType(SemanticContext &semantic_context,
+                             std::vector<VisitState> &states, TypeId type_id)
+{
+  if (type_id <= 6)
+  {
+    return true;
+  }
+  const auto &type = semantic_context.getType(type_id);
+  if (auto struct_type = dynamic_cast<const StructSemType *>(&type))
+  {
+    return checkStruct(semantic_context, states, struct_type->struct_id_);
+  }
+  if (auto array_type = dynamic_cast<const ArraySemType *>(&type))
+  {
+    return checkType(semantic_context, states, array_type->element_type_id_);
+  }
+  return true;
+}
