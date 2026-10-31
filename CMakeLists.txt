@@ -24,6 +24,8 @@ add_executable(rx-compiler
     src/semantic/TypeResolver.cpp
     src/semantic/DeclarationAnalyzer.cpp
     src/semantic/ConstEvaluator.cpp
+    src/semantic/BodyChecker.cpp
+    src/semantic/Scope.cpp
 )
 
 target_include_directories(rx-compiler PRIVATE generated)

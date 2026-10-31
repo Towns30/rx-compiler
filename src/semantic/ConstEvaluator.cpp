@@ -135,8 +135,8 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
     {
       return std::nullopt; // 单个Self不行
     }
-    auto it = ctx.func_const_name_to_id.find(const_name);
-    if (it == ctx.func_const_name_to_id.end())
+    auto it = ctx.func_const_name_to_symbol_.find(const_name);
+    if (it == ctx.func_const_name_to_symbol_.end())
     {
       return std::nullopt;
     }
@@ -242,6 +242,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
                          .value_ = ctx.constants_[index].value_.value()};
     }
   }
+  return std::nullopt;
 }
 
 std::optional<ConstResult>

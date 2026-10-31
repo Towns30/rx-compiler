@@ -38,7 +38,8 @@ private:
   buildBlockExpr(rx::RxParser::BlockExpressionContext *ctx);
   std::unique_ptr<LetStmt> buildLetStmt(rx::RxParser::LetStatementContext *ctx);
   std::unique_ptr<ExprStmt>
-  buildExprStmt(rx::RxParser::StatementExpressionContext *ctx);
+  buildExprStmt(rx::RxParser::StatementExpressionContext *ctx,
+                bool has_semicolon);
   AssignmentOperator
   getAssignOperator(rx::RxParser::AssignmentOperatorContext *ctx);
   std::unique_ptr<Expr>

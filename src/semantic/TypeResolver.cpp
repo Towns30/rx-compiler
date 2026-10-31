@@ -138,6 +138,10 @@ bool TypeResolver::resolveFuncStructTypes(SemanticContext &semantic_ctx)
 {
   for (auto &func_info : semantic_ctx.functions_)
   {
+    if (func_info.is_builtin_)
+    {
+      continue;
+    }
     const auto &decl = *func_info.declaration_;
     if (decl.self_param_ && !func_info.owner_struct_id_)
     {

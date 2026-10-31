@@ -608,14 +608,14 @@ std::unique_ptr<Stmt> AstBuilder::buildStmt(rx::RxParser::StatementContext *ctx)
   else if (ctx->expressionWithBlock())
   {
     auto result = std::make_unique<ExprStmt>(
-        buildExprWithBlock(ctx->expressionWithBlock()));
+        buildExprWithBlock(ctx->expressionWithBlock()), ctx->SEMI() != nullptr);
     result->span_ = spanOf(ctx);
     return result;
   }
   else if (ctx->statementExpression())
   {
-    auto result =
-        std::make_unique<ExprStmt>(buildStmtExpr(ctx->statementExpression()));
+    auto result = std::make_unique<ExprStmt>(
+        buildStmtExpr(ctx->statementExpression()), ctx->SEMI() != nullptr);
     result->span_ = spanOf(ctx);
     return result;
   }
@@ -647,9 +647,10 @@ AstBuilder::buildExpr(rx::RxParser::ExpressionContext *ctx)
 }
 
 std::unique_ptr<ExprStmt>
-AstBuilder::buildExprStmt(rx::RxParser::StatementExpressionContext *ctx)
+AstBuilder::buildExprStmt(rx::RxParser::StatementExpressionContext *ctx,
+                          bool has_semicolon)
 {
-  auto result = std::make_unique<ExprStmt>(buildStmtExpr(ctx));
+  auto result = std::make_unique<ExprStmt>(buildStmtExpr(ctx), has_semicolon);
   result->span_ = spanOf(ctx);
   return result;
 }

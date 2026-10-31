@@ -51,6 +51,11 @@ int main(int argc, char *argv[])
   antlr4::CommonTokenStream tokens(&lexer);
   rx::RxParser parser(&tokens);
   auto *tree = parser.crate();
+  if (lexer.getNumberOfSyntaxErrors() != 0 ||
+      parser.getNumberOfSyntaxErrors() != 0)
+  {
+    return 1;
+  }
   AstBuilder ast_builder;
   // printTree(tree, parser);
   auto ast_tree = ast_builder.Build(tree);

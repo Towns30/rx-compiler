@@ -299,8 +299,12 @@ class ExprStmt : public Stmt
 {
 public:
   std::unique_ptr<Expr> expr_;
+  bool has_semicolon_;
 
-  ExprStmt(std::unique_ptr<Expr> expr) : expr_(std::move(expr)) {}
+  ExprStmt(std::unique_ptr<Expr> expr, bool has_semicolon)
+      : expr_(std::move(expr)), has_semicolon_(has_semicolon)
+  {
+  }
 
   void print(int space_num) override;
 };

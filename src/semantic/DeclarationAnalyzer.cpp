@@ -26,7 +26,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       std::size_t const_id = semantic_ctx.constants_.size();
-      auto [it, inserted] = semantic_ctx.func_const_name_to_id.emplace(
+      auto [it, inserted] = semantic_ctx.func_const_name_to_symbol_.emplace(
           const_item->ident_,
           FuncConstSymbol{.kind_ = ValueKind::Constant, .index_ = const_id});
       if (!inserted)
@@ -61,7 +61,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
         return false;
       }
       std::size_t func_id = semantic_ctx.functions_.size();
-      auto [it, inserted] = semantic_ctx.func_const_name_to_id.emplace(
+      auto [it, inserted] = semantic_ctx.func_const_name_to_symbol_.emplace(
           func_item->ident_,
           FuncConstSymbol{.kind_ = ValueKind::Function, .index_ = func_id});
       if (!inserted)
