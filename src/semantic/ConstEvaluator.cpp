@@ -72,10 +72,10 @@ ConstEvaluator::evaluateLiteralExpr(SemanticContext &ctx,
                                     const LiteralExpr *literal_expr,
                                     std::optional<TypeId> expected_type)
 {
-  if (literal_expr->is_int_)
+  if (literal_expr->is_int_) // int
   {
     auto type_id = getIntegerTypeId(literal_expr->int_type_);
-    if (type_id == std::nullopt)
+    if (type_id == std::nullopt) // 自己不带类型
     {
       if (expected_type != std::nullopt)
       {
@@ -91,7 +91,7 @@ ConstEvaluator::evaluateLiteralExpr(SemanticContext &ctx,
         type_id = 0; // 无期望也无推断，为i32
       }
     }
-    else
+    else // 自己有类型，若有期望类型必须符合
     {
       if (expected_type != std::nullopt &&
           expected_type.value() != type_id.value())
@@ -103,7 +103,7 @@ ConstEvaluator::evaluateLiteralExpr(SemanticContext &ctx,
                        .value_ =
                            static_cast<std::int64_t>(literal_expr->int_value_)};
   }
-  else
+  else // bool
   {
     if (expected_type != std::nullopt && expected_type.value() != 4)
     {
@@ -124,7 +124,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
   {
     return std::nullopt;
   }
-  if (path_expr->path_segments_.size() == 1)
+  if (path_expr->path_segments_.size() == 1) // const
   {
     auto const_name = path_expr->path_segments_[0].name_;
     if (path_expr->path_segments_[0].generic_args_.size() != 0)
@@ -146,7 +146,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
     }
     int index = it->second.index_;
     auto const_info = ctx.constants_[index];
-    if (const_info.status_ == ConstEvaluateStatus::Done)
+    if (const_info.status_ == ConstEvaluateStatus::Done) // 算完了，没毛
     {
       if (expected_type != std::nullopt &&
           expected_type.value() != const_info.type_id_)
@@ -161,7 +161,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
     {
       return std::nullopt;
     }
-    else
+    else // 还没算
     {
       if (!evaluateConst(ctx, index, owner_struct_id))
       {
@@ -176,7 +176,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
                          .value_ = ctx.constants_[index].value_.value()};
     }
   }
-  if (path_expr->path_segments_.size() == 2)
+  if (path_expr->path_segments_.size() == 2) // struct::const
   {
     auto name_1 = path_expr->path_segments_[0].name_;
     auto name_2 = path_expr->path_segments_[1].name_;
@@ -212,7 +212,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
       return std::nullopt;
     }
     int index = const_it->second.index_;
-    if (const_info.status_ == ConstEvaluateStatus::Done)
+    if (const_info.status_ == ConstEvaluateStatus::Done) // 算完了，没毛
     {
       if (expected_type != std::nullopt &&
           expected_type.value() != const_info.type_id_)
@@ -227,7 +227,7 @@ ConstEvaluator::evaluatePathExpr(SemanticContext &ctx,
     {
       return std::nullopt;
     }
-    else
+    else // 还没算
     {
       if (!evaluateConst(ctx, index, owner_struct_id))
       {

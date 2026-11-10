@@ -35,6 +35,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
       }
       semantic_ctx.constants_.push_back(
           ConstInfo{.name_ = const_item->ident_, .declaration_ = const_item});
+      semantic_ctx.const_item_to_const_ids_.emplace(const_item, const_id);
     }
     else if (auto struct_item = dynamic_cast<const StructItem *>(item.get()))
     {
@@ -117,6 +118,7 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
             ConstInfo{.name_ = const_item->ident_,
                       .owner_struct_id_ = owner_struct_id,
                       .declaration_ = const_item});
+        semantic_ctx.const_item_to_const_ids_.emplace(const_item, new_id);
       }
       else if (auto func_item = dynamic_cast<const FuncItem *>(item.get()))
       {

@@ -11,6 +11,7 @@ public:
   bool checkAll(const Crate *crate, SemanticContext &semantic_ctx);
 
 private:
+  LocalId next_local_id_ = 0;
   std::vector<LoopInfo> loop_stack_;
   std::optional<std::size_t> getLoopTarget();
   std::optional<MethodInfo> findMethod(TypeId receiver_type_id,
@@ -21,7 +22,8 @@ private:
   std::optional<DerefInfo> dereferenceOnce(TypeId type_id,
                                            SemanticContext &semantic_ctx);
   bool canCoerce(TypeId source_type_id, TypeId target_type_id,
-                 SemanticContext &semantic_ctx);
+                 SemanticContext &semantic_ctx,
+                 std::vector<DerefKind> &deref_steps);
   std::optional<TypeId> getLubTypeId(const std::vector<ExprInfo> &expr_infos,
                                     SemanticContext &semantic_ctx);
   bool checkFunction(const FuncInfo &func_info, SemanticContext &semantic_ctx);

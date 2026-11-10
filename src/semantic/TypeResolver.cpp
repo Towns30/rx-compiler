@@ -7,7 +7,7 @@ TypeResolver::resolveType(const Type *type, SemanticContext &semantic_ctx,
                           std::optional<StructId> owner_struct_id)
 {
   if (auto *path_type =
-          dynamic_cast<const PathType *>(type)) // self会被解析为 PathType
+          dynamic_cast<const PathType *>(type)) // Self会被解析为 PathType
   {
     if (path_type->path_segments_.size() != 1)
     {
@@ -83,7 +83,7 @@ TypeResolver::resolveType(const Type *type, SemanticContext &semantic_ctx,
     }
     ConstEvaluator const_evaluator;
     auto const_result = const_evaluator.evaluateExpr(
-        semantic_ctx, array_type->const_value_.get(), 3, owner_struct_id);
+        semantic_ctx, array_type->const_value_.get(), 3, owner_struct_id); // 计算len
     if (const_result == std::nullopt)
     {
       return std::nullopt;
@@ -164,7 +164,7 @@ bool TypeResolver::resolveFuncStructTypes(SemanticContext &semantic_ctx)
       return false;
     }
     func_info.return_type_id_ = return_type_id.value();
-    std::unordered_set<std::string> param_names;
+    std::unordered_set<std::string> param_names; // 参数名查重
     for (auto &func_param : func_info.declaration_->func_params_)
     {
       auto param_name = func_param.ident_;
@@ -184,7 +184,7 @@ bool TypeResolver::resolveFuncStructTypes(SemanticContext &semantic_ctx)
   }
   for (auto &struct_info : semantic_ctx.structs_)
   {
-    std::unordered_set<std::string> field_names;
+    std::unordered_set<std::string> field_names; // 字段名查重
     for (auto &struct_field : struct_info.declaration_->fields_)
     {
       auto name = struct_field.ident_;

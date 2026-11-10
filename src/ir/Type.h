@@ -8,39 +8,34 @@
 namespace ir
 {
 
-struct TypeId
-{
-  std::size_t index_;
+using IRTypeId = std::size_t;
 
-  bool operator==(const TypeId &) const = default;
-};
-
-struct VoidType
+struct VoidIRType
 {
 };
 
-struct IntegerType
+struct IntegerIRType
 {
   unsigned bit_width_;
 };
 
-struct PointerType
+struct PointerIRType
 {
 };
 
-struct ArrayType
+struct ArrayIRType
 {
-  TypeId element_type_id_;
+  IRTypeId element_type_id_;
   std::size_t length_;
 };
 
-struct StructType
+struct StructIRType
 {
   std::string name_;
-  std::vector<TypeId> fields_;
+  std::vector<IRTypeId> fields_;
 };
 
-using Type =
-    std::variant<VoidType, IntegerType, PointerType, ArrayType, StructType>;
+using IRType =
+    std::variant<VoidIRType, IntegerIRType, PointerIRType, ArrayIRType, StructIRType>;
 
 } // namespace ir
