@@ -3,6 +3,9 @@
 #include "SemanticContext.h"
 #include <optional>
 
+namespace semantic
+{
+
 struct ConstResult
 {
   TypeId type_id_;
@@ -30,3 +33,5 @@ public:
                     std::optional<StructId> owner_struct_id, std::optional<TypeId> expected_type);
   std::optional<TypeId> getIntegerTypeId(IntegerType integer_type);
 };
+
+} // namespace semantic

@@ -7,6 +7,9 @@
 #include <variant>
 #include <vector>
 
+namespace semantic
+{
+
 using ConstValue = std::variant<std::int64_t, bool>;
 using LocalId = std::size_t;
 
@@ -175,3 +178,5 @@ public:
   ConstEvaluateStatus status_;
   const ConstItem *declaration_ = nullptr;
 };
+
+} // namespace semantic

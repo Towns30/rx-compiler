@@ -1,6 +1,9 @@
 #include "Scope.h"
 #include <utility>
 
+namespace semantic
+{
+
 void Scope::enterScope()
 {
   scopes_.push_back(std::unordered_map<std::string, VarInfo>());
@@ -26,3 +29,5 @@ const VarInfo *Scope::getVar(const std::string &name)
   }
   return nullptr;
 }
+
+} // namespace semantic

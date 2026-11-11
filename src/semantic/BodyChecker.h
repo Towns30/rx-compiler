@@ -5,6 +5,9 @@
 #include "Symbols.h"
 #include "TypeResolver.h"
 
+namespace semantic
+{
+
 class BodyChecker
 {
 public:
@@ -128,3 +131,5 @@ private:
                                          std::optional<TypeId> expected_type_id,
                                          const FuncInfo &func_info);
 };
+
+} // namespace semantic

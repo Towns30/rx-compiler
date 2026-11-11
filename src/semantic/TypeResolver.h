@@ -5,6 +5,9 @@
 #include "Symbols.h"
 #include "Types.h"
 
+namespace semantic
+{
+
 class TypeResolver
 {
 public:
@@ -19,3 +22,5 @@ private:
   bool checkStruct(SemanticContext &semantic_context, std::vector<VisitState> &states, StructId struct_id);
   bool checkType(SemanticContext &semantic_context, std::vector<VisitState> &states, TypeId type_id);
 };
+
+} // namespace semantic

@@ -1,6 +1,9 @@
 #include "SemanticAnalyzer.h"
 #include "BodyChecker.h"
 
+namespace semantic
+{
+
 bool SemanticAnalyzer::SemanticCheck(const Crate &crate, SemanticContext& semantic_ctx)
 {
   DeclarationAnalyzer decl_collector;
@@ -44,3 +47,5 @@ bool SemanticAnalyzer::SemanticCheck(const Crate &crate, SemanticContext& semant
   }
   return true;
 }
+
+} // namespace semantic

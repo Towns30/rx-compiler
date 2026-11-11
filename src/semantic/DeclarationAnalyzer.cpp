@@ -1,5 +1,8 @@
 #include "DeclarationAnalyzer.h"
 
+namespace semantic
+{
+
 inline bool IsProtectedTypeName(const std::string &name)
 {
   return name == "i32" || name == "u32" || name == "isize" || name == "usize" ||
@@ -140,3 +143,5 @@ bool DeclarationAnalyzer::DeclCollect(const Crate &crate,
   }
   return true;
 }
+
+} // namespace semantic

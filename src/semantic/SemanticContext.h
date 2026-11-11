@@ -5,6 +5,9 @@
 #include <unordered_map>
 #include <cstdint>
 
+namespace semantic
+{
+
 class SemanticContext
 {
 public:
@@ -58,3 +61,5 @@ private:
   std::optional<TypeId> getVecTypeId(const VecSemType& vec_type);
 
 };
+
+} // namespace semantic

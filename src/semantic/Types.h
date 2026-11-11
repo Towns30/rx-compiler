@@ -2,6 +2,9 @@
 #include "../Utils.h"
 #include "../ast/Ast.h"
 
+namespace semantic
+{
+
 using StructId = std::size_t;
 using TypeId = std::size_t;
 
@@ -115,3 +118,5 @@ public:
 
   TypeKind kind() const override { return TypeKind::Vec; }
 };
+
+} // namespace semantic

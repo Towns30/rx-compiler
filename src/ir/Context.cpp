@@ -21,12 +21,12 @@ std::size_t IRContext::getTypeCount() const
   return types_.size();
 }
 
-IRTypeId IRContext::getVoidType()
+IRTypeId IRContext::getOrCreateVoidType()
 {
   return 0;
 }
 
-IRTypeId IRContext::getIntegerType(unsigned bit_width)
+IRTypeId IRContext::getOrCreateIntegerType(unsigned bit_width)
 {
   for (std::size_t i = 0; i < types_.size(); i++)
   {
@@ -45,12 +45,12 @@ IRTypeId IRContext::getIntegerType(unsigned bit_width)
   return type_id;
 }
 
-IRTypeId IRContext::getPointerType()
+IRTypeId IRContext::getOrCreatePointerType()
 {
   return 1;
 }
 
-IRTypeId IRContext::getArrayType(IRTypeId element_type, std::size_t length)
+IRTypeId IRContext::getOrCreateArrayType(IRTypeId element_type, std::size_t length)
 {
   for (std::size_t i = 0; i < types_.size(); i++)
   {

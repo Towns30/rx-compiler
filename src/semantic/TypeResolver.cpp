@@ -2,6 +2,9 @@
 #include <limits>
 #include <unordered_set>
 
+namespace semantic
+{
+
 std::optional<TypeId>
 TypeResolver::resolveType(const Type *type, SemanticContext &semantic_ctx,
                           std::optional<StructId> owner_struct_id)
@@ -261,3 +264,5 @@ bool TypeResolver::checkType(SemanticContext &semantic_context,
   }
   return true;
 }
+
+} // namespace semantic

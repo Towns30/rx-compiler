@@ -4,6 +4,9 @@
 #include <unordered_set>
 #include <utility>
 
+namespace semantic
+{
+
 bool BodyChecker::checkAll(const Crate *crate, SemanticContext &semantic_ctx)
 {
   next_local_id_ = 0;
@@ -3165,3 +3168,5 @@ std::optional<ExprInfo> BodyChecker::checkWhileExpr(
   }
   return result_info;
 }
+
+} // namespace semantic

@@ -1,5 +1,8 @@
 #include "SemanticContext.h"
 
+namespace semantic
+{
+
 const SemType &SemanticContext::getType(TypeId type_id)
 {
   return *types_[type_id];
@@ -567,3 +570,5 @@ std::optional<TypeId> SemanticContext::getVecTypeId(const VecSemType &vec_type)
   }
   return std::nullopt;
 }
+
+} // namespace semantic

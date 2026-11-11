@@ -1,5 +1,8 @@
 #include "ConstEvaluator.h"
 
+namespace semantic
+{
+
 bool ConstEvaluator::evaluateAll(SemanticContext &ctx)
 {
   for (int i = 0; i < ctx.constants_.size(); i++)
@@ -329,3 +332,5 @@ std::optional<TypeId> ConstEvaluator::getIntegerTypeId(IntegerType integer_type)
     return std::nullopt;
   }
 }
+
+} // namespace semantic

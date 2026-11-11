@@ -3,6 +3,9 @@
 #include "Symbols.h"
 #include "Types.h"
 
+namespace semantic
+{
+
 class Scope
 {
 public:
@@ -14,3 +17,5 @@ public:
 private:
   std::vector<std::unordered_map<std::string, VarInfo>> scopes_;
 };
+
+} // namespace semantic
