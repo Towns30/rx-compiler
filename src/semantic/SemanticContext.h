@@ -39,7 +39,7 @@ public:
   std::unordered_map<std::string, TypeId> builtin_type_to_type_id_;
   std::unordered_map<StructId, TypeId> struct_id_to_type_id_;
   std::unordered_map<const LetStmt *, LocalId> let_to_local_ids_;
-  std::unordered_map<const FuncItem *, FuncLocalIds> funcitem_to_func_localIds_;
+  std::unordered_map<FunctionId, FuncLocalIds> function_id_to_func_local_ids_;
   std::unordered_map<const ConstItem *, std::size_t> const_item_to_const_ids_;
   std::unordered_map<const Expr *, ExprInfo> expr_to_exprinfos_;
 

@@ -28,8 +28,8 @@ private:
                  SemanticContext &semantic_ctx,
                  std::vector<DerefKind> &deref_steps);
   std::optional<TypeId> getLubTypeId(const std::vector<ExprInfo> &expr_infos,
-                                    SemanticContext &semantic_ctx);
-  bool checkFunction(const FuncInfo &func_info, SemanticContext &semantic_ctx);
+                                     SemanticContext &semantic_ctx);
+  bool checkFunction(FunctionId function_id, SemanticContext &semantic_ctx);
   std::optional<ExprInfo> checkExpr(const Expr *expr,
                                     SemanticContext &semantic_ctx, Scope &scope,
                                     std::optional<TypeId> expected_type_id,

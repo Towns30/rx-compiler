@@ -1,11 +1,11 @@
 #pragma once
+#include "../Ids.h"
 #include "../Utils.h"
 #include "../ast/Ast.h"
 
 namespace semantic
 {
 
-using StructId = std::size_t;
 using TypeId = std::size_t;
 
 enum class TypeKind

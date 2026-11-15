@@ -13,14 +13,16 @@ bool BodyChecker::checkAll(const Crate *crate, SemanticContext &semantic_ctx)
   semantic_ctx.local_type_ids_.clear();
   semantic_ctx.expr_to_exprinfos_.clear();
   semantic_ctx.let_to_local_ids_.clear();
-  semantic_ctx.funcitem_to_func_localIds_.clear();
-  for (auto func_info : semantic_ctx.functions_)
+  semantic_ctx.function_id_to_func_local_ids_.clear();
+  for (FunctionId function_id = 0; function_id < semantic_ctx.functions_.size();
+       function_id++)
   {
+    const auto &func_info = semantic_ctx.functions_[function_id];
     if (func_info.is_builtin_)
     {
       continue;
     }
-    if (!checkFunction(func_info, semantic_ctx))
+    if (!checkFunction(function_id, semantic_ctx))
     {
       return false;
     }
@@ -42,26 +44,14 @@ std::optional<std::size_t> BodyChecker::getLoopTarget()
   return loop_stack_.size() - 1;
 }
 
-bool BodyChecker::checkFunction(const FuncInfo &func_info,
+bool BodyChecker::checkFunction(FunctionId function_id,
                                 SemanticContext &semantic_ctx)
 {
+  const auto &func_info = semantic_ctx.functions_[function_id];
   loop_stack_.clear();
   Scope scope;
   scope.enterScope();
   FuncLocalIds func_local_info;
-  for (int i = 0; i < func_info.args_type_id_.size(); i++)
-  {
-    TypeId var_type_id = func_info.args_type_id_[i];
-    bool var_mut = func_info.declaration_->func_params_[i].mut_;
-    std::string var_name = func_info.declaration_->func_params_[i].ident_;
-    LocalId local_id = next_local_id_++;
-    semantic_ctx.local_type_ids_.push_back(var_type_id);
-    func_local_info.param_local_ids_.push_back(local_id);
-    scope.bind(VarInfo{.name_ = var_name,
-                       .type_id_ = var_type_id,
-                       .mut_ = var_mut,
-                       .local_id_ = local_id});
-  }
   // 为Self分配作用域
   if (func_info.self_param_)
   {
@@ -103,8 +93,21 @@ bool BodyChecker::checkFunction(const FuncInfo &func_info,
     // 以self为变量名进入作用域
     LocalId local_id = next_local_id_++;
     semantic_ctx.local_type_ids_.push_back(var_type_id);
-    func_local_info.self_local_id_ = local_id;
+    func_local_info.param_local_ids_.push_back(local_id);
     scope.bind(VarInfo{.name_ = "self",
+                       .type_id_ = var_type_id,
+                       .mut_ = var_mut,
+                       .local_id_ = local_id});
+  }
+  for (int i = 0; i < func_info.args_type_id_.size(); i++)
+  {
+    TypeId var_type_id = func_info.args_type_id_[i];
+    bool var_mut = func_info.declaration_->func_params_[i].mut_;
+    std::string var_name = func_info.declaration_->func_params_[i].ident_;
+    LocalId local_id = next_local_id_++;
+    semantic_ctx.local_type_ids_.push_back(var_type_id);
+    func_local_info.param_local_ids_.push_back(local_id);
+    scope.bind(VarInfo{.name_ = var_name,
                        .type_id_ = var_type_id,
                        .mut_ = var_mut,
                        .local_id_ = local_id});
@@ -118,8 +121,8 @@ bool BodyChecker::checkFunction(const FuncInfo &func_info,
   }
   semantic_ctx.expr_to_exprinfos_.insert_or_assign(
       func_info.declaration_->block_expr_.get(), ExprInfo.value());
-  semantic_ctx.funcitem_to_func_localIds_.insert_or_assign(func_info.declaration_,
-                                                  std::move(func_local_info));
+  semantic_ctx.function_id_to_func_local_ids_.insert_or_assign(
+      function_id, std::move(func_local_info));
   return true;
 }
 
@@ -324,9 +327,9 @@ BodyChecker::findMethod(TypeId receiver_type_id, const std::string &method_name,
       return MethodInfo{.receiver_type_id_ = receiver_type_id,
                         .args_type_id_ = {},
                         .return_type_id_ = 3,
-                        .call_target_ = CallTarget{
-                            .kind_ = target_kind,
-                            .owner_type_id_ = owner_type_id}};
+                        .call_target_ =
+                            CallTarget{.kind_ = target_kind,
+                                       .owner_type_id_ = owner_type_id}};
     }
     if (method_name == "is_empty" &&
         dynamic_cast<const VecSemType *>(&owner_type))
@@ -334,9 +337,9 @@ BodyChecker::findMethod(TypeId receiver_type_id, const std::string &method_name,
       return MethodInfo{.receiver_type_id_ = receiver_type_id,
                         .args_type_id_ = {},
                         .return_type_id_ = 4,
-                        .call_target_ = CallTarget{
-                            .kind_ = CallTargetKind::VecIsEmpty,
-                            .owner_type_id_ = owner_type_id}};
+                        .call_target_ =
+                            CallTarget{.kind_ = CallTargetKind::VecIsEmpty,
+                                       .owner_type_id_ = owner_type_id}};
     }
     if (method_name == "clone" && semantic_ctx.isCloneType(owner_type_id))
     {
@@ -344,9 +347,9 @@ BodyChecker::findMethod(TypeId receiver_type_id, const std::string &method_name,
       return MethodInfo{.receiver_type_id_ = receiver_type_id,
                         .args_type_id_ = {},
                         .return_type_id_ = owner_type_id,
-                        .call_target_ = CallTarget{
-                            .kind_ = CallTargetKind::Clone,
-                            .owner_type_id_ = owner_type_id}};
+                        .call_target_ =
+                            CallTarget{.kind_ = CallTargetKind::Clone,
+                                       .owner_type_id_ = owner_type_id}};
     }
   }
   else if (auto vec_type = dynamic_cast<const VecSemType *>(&owner_type))
@@ -356,18 +359,18 @@ BodyChecker::findMethod(TypeId receiver_type_id, const std::string &method_name,
       return MethodInfo{.receiver_type_id_ = receiver_type_id,
                         .args_type_id_ = {vec_type->element_type_id_},
                         .return_type_id_ = 5,
-                        .call_target_ = CallTarget{
-                            .kind_ = CallTargetKind::VecPush,
-                            .owner_type_id_ = owner_type_id}};
+                        .call_target_ =
+                            CallTarget{.kind_ = CallTargetKind::VecPush,
+                                       .owner_type_id_ = owner_type_id}};
     }
     if (method_name == "remove")
     {
       return MethodInfo{.receiver_type_id_ = receiver_type_id,
                         .args_type_id_ = {3},
                         .return_type_id_ = vec_type->element_type_id_,
-                        .call_target_ = CallTarget{
-                            .kind_ = CallTargetKind::VecRemove,
-                            .owner_type_id_ = owner_type_id}};
+                        .call_target_ =
+                            CallTarget{.kind_ = CallTargetKind::VecRemove,
+                                       .owner_type_id_ = owner_type_id}};
     }
   }
   return std::nullopt;
@@ -470,20 +473,20 @@ BodyChecker::getLubTypeId(const std::vector<ExprInfo> &expr_infos,
     {
       result_type_id = type_id;
     }
-    else if (canCoerce(type_id, result_type_id.value(),
-                       semantic_ctx, source_deref_steps))
+    else if (canCoerce(type_id, result_type_id.value(), semantic_ctx,
+                       source_deref_steps))
     {
       continue;
     }
-    else if (canCoerce(result_type_id.value(), type_id,
-                       semantic_ctx, target_deref_steps))
+    else if (canCoerce(result_type_id.value(), type_id, semantic_ctx,
+                       target_deref_steps))
     {
       // 切换目标前，重新检查所有更早的结果
       for (std::size_t j = 0; j < i; j++)
       {
         std::vector<DerefKind> deref_steps;
-        if (!canCoerce(expr_infos[j].type_id_, type_id,
-                       semantic_ctx, deref_steps))
+        if (!canCoerce(expr_infos[j].type_id_, type_id, semantic_ctx,
+                       deref_steps))
         {
           return std::nullopt;
         }
@@ -678,8 +681,8 @@ std::optional<ExprInfo> BodyChecker::checkArrayExpr(
       {
         return std::nullopt;
       }
-      semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-          element_expr.get(), element_info.value());
+      semantic_ctx.expr_to_exprinfos_.insert_or_assign(element_expr.get(),
+                                                       element_info.value());
       element_infos.push_back(element_info.value());
       // 有一个表达式发散整体就发散
       if (element_info.value().diverges_)
@@ -706,11 +709,12 @@ std::optional<ExprInfo> BodyChecker::checkArrayExpr(
       {
         auto &element_info = element_infos[i];
         std::vector<DerefKind> deref_steps;
-        if (!canCoerce(element_info.type_id_, element_type_id,
-                       semantic_ctx, deref_steps))
+        if (!canCoerce(element_info.type_id_, element_type_id, semantic_ctx,
+                       deref_steps))
         {
           return std::nullopt;
         }
+        // 拒绝经过共享引用产生的&mut
         if (element_info.through_shared_)
         {
           const auto &element_type = semantic_ctx.getType(element_type_id);
@@ -726,8 +730,8 @@ std::optional<ExprInfo> BodyChecker::checkArrayExpr(
           element_info.coerced_type_id_ = element_type_id;
           element_info.coercion_derefs_ = std::move(deref_steps);
         }
-        semantic_ctx.expr_to_exprinfos_.insert_or_assign(array_expr->exprs_[i].get(),
-                                                   element_info);
+        semantic_ctx.expr_to_exprinfos_.insert_or_assign(
+            array_expr->exprs_[i].get(), element_info);
       }
     }
     TypeId array_type_id =
@@ -834,8 +838,9 @@ std::optional<ExprInfo> BodyChecker::checkStructExpr(
     }
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id && !canCoerce(struct_type_id.value(),
-                                     expected_type_id.value(), semantic_ctx, deref_steps))
+  if (expected_type_id &&
+      !canCoerce(struct_type_id.value(), expected_type_id.value(), semantic_ctx,
+                 deref_steps))
   {
     return std::nullopt;
   }
@@ -874,8 +879,8 @@ BodyChecker::checkIfExpr(const IfExpr *if_expr, SemanticContext &semantic_ctx,
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        if_expr->block_expr_.get(), then_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(if_expr->block_expr_.get(),
+                                                     then_info.value());
     std::vector<DerefKind> deref_steps;
     if (expected_type_id &&
         !canCoerce(5, expected_type_id.value(), semantic_ctx, deref_steps))
@@ -885,9 +890,9 @@ BodyChecker::checkIfExpr(const IfExpr *if_expr, SemanticContext &semantic_ctx,
     ExprInfo result_info{.type_id_ = 5,
                          .is_place_ = false,
                          .mut_ = false,
-                         .diverges_ =
-                             condition_info.value().diverges_,
-                         .coercion_derefs_ = std::move(deref_steps)}; // 条件发散即发散
+                         .diverges_ = condition_info.value().diverges_,
+                         .coercion_derefs_ =
+                             std::move(deref_steps)}; // 条件发散即发散
     if (expected_type_id && expected_type_id.value() != 5)
     {
       result_info.coerced_type_id_ = expected_type_id;
@@ -903,8 +908,8 @@ BodyChecker::checkIfExpr(const IfExpr *if_expr, SemanticContext &semantic_ctx,
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        if_expr->block_expr_.get(), then_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(if_expr->block_expr_.get(),
+                                                     then_info.value());
     std::optional<ExprInfo> else_info;
     // else block
     if (!if_expr->is_else_if_)
@@ -962,8 +967,8 @@ BodyChecker::checkIfExpr(const IfExpr *if_expr, SemanticContext &semantic_ctx,
       {
         auto &branch_info = branch_infos[i];
         std::vector<DerefKind> deref_steps;
-        if (!canCoerce(branch_info.type_id_, result_type_id,
-                       semantic_ctx, deref_steps))
+        if (!canCoerce(branch_info.type_id_, result_type_id, semantic_ctx,
+                       deref_steps))
         {
           return std::nullopt;
         }
@@ -982,7 +987,8 @@ BodyChecker::checkIfExpr(const IfExpr *if_expr, SemanticContext &semantic_ctx,
           branch_info.coerced_type_id_ = result_type_id;
           branch_info.coercion_derefs_ = std::move(deref_steps);
         }
-        semantic_ctx.expr_to_exprinfos_.insert_or_assign(branch_exprs[i], branch_info);
+        semantic_ctx.expr_to_exprinfos_.insert_or_assign(branch_exprs[i],
+                                                         branch_info);
       }
     }
     // 条件发散或有两个分支且两个分支都发散
@@ -1016,17 +1022,15 @@ std::optional<ExprInfo> BodyChecker::checkBreakExpr(
   if (!break_expr->value_) // 没有操作数，提供 unit
   {
     std::vector<DerefKind> deref_steps;
-    if (break_expected_type_id &&
-        !canCoerce(5, break_expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (break_expected_type_id && !canCoerce(5, break_expected_type_id.value(),
+                                             semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
-    loop_stack_[loop_index].break_values_.push_back(
-        BreakValueInfo{.expr_ = nullptr,
-                       .expr_info_ = ExprInfo{.type_id_ = 5,
-                                              .is_place_ = false,
-                                              .mut_ = false}});
+    loop_stack_[loop_index].break_values_.push_back(BreakValueInfo{
+        .expr_ = nullptr,
+        .expr_info_ =
+            ExprInfo{.type_id_ = 5, .is_place_ = false, .mut_ = false}});
   }
   else // 有操作数，break负责检查，循环负责LUB
   {
@@ -1045,8 +1049,8 @@ std::optional<ExprInfo> BodyChecker::checkBreakExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        break_expr->value_.get(), expr_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(break_expr->value_.get(),
+                                                     expr_info.value());
     loop_stack_[loop_index].break_values_[break_index].expr_info_ =
         expr_info.value();
   }
@@ -1072,8 +1076,8 @@ std::optional<ExprInfo> BodyChecker::checkReturnExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        return_expr->value_.get(), expr_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(return_expr->value_.get(),
+                                                     expr_info.value());
     ExprInfo result_info{
         .type_id_ = 6, .is_place_ = false, .mut_ = false, .diverges_ = true};
     if (expected_type_id && expected_type_id.value() != 6)
@@ -1129,8 +1133,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      unary_expr->expr_.get(), operand_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(unary_expr->expr_.get(),
+                                                   operand_info.value());
   if (unary_expr->op_ == UnaryOperator::Negate)
   {
     const auto &operand_type =
@@ -1155,9 +1159,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
       return std::nullopt;
     }
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(result_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(result_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1197,9 +1200,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
       return std::nullopt;
     }
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(result_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(result_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1219,9 +1221,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
     TypeId result_type_id = semantic_ctx.getOrCreateReferenceTypeId(
         operand_info.value().type_id_, false);
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(result_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(result_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1246,9 +1247,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
     TypeId result_type_id = semantic_ctx.getOrCreateReferenceTypeId(
         operand_info.value().type_id_, true);
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(result_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(result_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1303,8 +1303,8 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
     std::vector<DerefKind> deref_steps;
     if (expected_type_id)
     {
-      if (!canCoerce(result_type_id, expected_type_id.value(),
-                     semantic_ctx, deref_steps))
+      if (!canCoerce(result_type_id, expected_type_id.value(), semantic_ctx,
+                     deref_steps))
       {
         return std::nullopt;
       }
@@ -1334,7 +1334,6 @@ std::optional<ExprInfo> BodyChecker::checkUnaryExpr(
     }
     return result_info;
   }
-
   return std::nullopt;
 }
 
@@ -1385,7 +1384,8 @@ std::optional<ExprInfo> BodyChecker::checkPathExpr(
                            .mut_ = false,
                            .const_id_ = symbol.index_,
                            .coercion_derefs_ = std::move(deref_steps)};
-      if (expected_type_id && expected_type_id.value() != const_info.type_id_.value())
+      if (expected_type_id &&
+          expected_type_id.value() != const_info.type_id_.value())
       {
         result_info.coerced_type_id_ = expected_type_id;
       }
@@ -1393,8 +1393,8 @@ std::optional<ExprInfo> BodyChecker::checkPathExpr(
     }
     std::vector<DerefKind> deref_steps;
     if (expected_type_id &&
-        !canCoerce(var_info->type_id_, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+        !canCoerce(var_info->type_id_, expected_type_id.value(), semantic_ctx,
+                   deref_steps))
     {
       return std::nullopt;
     }
@@ -1470,7 +1470,8 @@ std::optional<ExprInfo> BodyChecker::checkPathExpr(
                            .mut_ = false,
                            .const_id_ = const_id,
                            .coercion_derefs_ = std::move(deref_steps)};
-      if (expected_type_id && expected_type_id.value() != const_info.type_id_.value())
+      if (expected_type_id &&
+          expected_type_id.value() != const_info.type_id_.value())
       {
         result_info.coerced_type_id_ = expected_type_id;
       }
@@ -1531,8 +1532,8 @@ std::optional<ExprInfo> BodyChecker::checkBlockExpr(
       {
         return std::nullopt;
       }
-      semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-          let_stmt->expr_.get(), expr_info.value());
+      semantic_ctx.expr_to_exprinfos_.insert_or_assign(let_stmt->expr_.get(),
+                                                       expr_info.value());
       if (expr_info.value().diverges_) // let发散则发散，因为必经
       {
         diverges = true;
@@ -1569,8 +1570,8 @@ std::optional<ExprInfo> BodyChecker::checkBlockExpr(
         {
           return std::nullopt;
         }
-        semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-            expr, expr_info.value());
+        semantic_ctx.expr_to_exprinfos_.insert_or_assign(expr,
+                                                         expr_info.value());
         if (expr_info.value().diverges_)
         {
           diverges = true;
@@ -1584,8 +1585,8 @@ std::optional<ExprInfo> BodyChecker::checkBlockExpr(
         {
           return std::nullopt;
         }
-        semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-            expr, expr_info.value());
+        semantic_ctx.expr_to_exprinfos_.insert_or_assign(expr,
+                                                         expr_info.value());
         if (expr_info.value().diverges_)
         {
           diverges = true;
@@ -1601,8 +1602,8 @@ std::optional<ExprInfo> BodyChecker::checkBlockExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        tail_expr, expr_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(tail_expr,
+                                                     expr_info.value());
     // 块转发尾表达式转换后的结果
     if (expr_info.value().coerced_type_id_)
     {
@@ -1628,17 +1629,16 @@ std::optional<ExprInfo> BodyChecker::checkBlockExpr(
       return_type_id = 5;
       std::vector<DerefKind> deref_steps;
       if (expected_type_id &&
-          !canCoerce(return_type_id, expected_type_id.value(),
-                     semantic_ctx, deref_steps))
+          !canCoerce(return_type_id, expected_type_id.value(), semantic_ctx,
+                     deref_steps))
       {
         return std::nullopt;
       }
     }
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id &&
-      !canCoerce(return_type_id, expected_type_id.value(),
-                 semantic_ctx, deref_steps))
+  if (expected_type_id && !canCoerce(return_type_id, expected_type_id.value(),
+                                     semantic_ctx, deref_steps))
   {
     return std::nullopt;
   }
@@ -1672,16 +1672,16 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     const auto &lhs_type = semantic_ctx.getType(lhs_info.value().type_id_);
     TypeId lhs_type_id;
     if (auto reference_type = dynamic_cast<const ReferenceSemType *>(&lhs_type))
@@ -1722,9 +1722,8 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     }
 
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(lhs_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(lhs_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1732,7 +1731,7 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
                          .is_place_ = false,
                          .mut_ = false,
                          .diverges_ = lhs_info.value().diverges_ ||
-                             rhs_info.value().diverges_,
+                                      rhs_info.value().diverges_,
                          .coercion_derefs_ = std::move(deref_steps)};
     if (expected_type_id && expected_type_id.value() != lhs_type_id)
     {
@@ -1751,16 +1750,16 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     const auto &lhs_type = semantic_ctx.getType(lhs_info.value().type_id_);
     TypeId lhs_type_id;
     if (auto reference_type = dynamic_cast<const ReferenceSemType *>(&lhs_type))
@@ -1800,9 +1799,8 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
       return std::nullopt;
     }
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(lhs_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(lhs_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1810,7 +1808,7 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
                          .is_place_ = false,
                          .mut_ = false,
                          .diverges_ = lhs_info.value().diverges_ ||
-                             rhs_info.value().diverges_,
+                                      rhs_info.value().diverges_,
                          .coercion_derefs_ = std::move(deref_steps)};
     if (expected_type_id && expected_type_id.value() != lhs_type_id)
     {
@@ -1828,16 +1826,16 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     const auto &lhs_type = semantic_ctx.getType(lhs_info.value().type_id_);
     TypeId lhs_type_id;
     if (auto reference_type = dynamic_cast<const ReferenceSemType *>(&lhs_type))
@@ -1878,9 +1876,8 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
       return std::nullopt;
     }
     std::vector<DerefKind> deref_steps;
-    if (expected_type_id &&
-        !canCoerce(lhs_type_id, expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (expected_type_id && !canCoerce(lhs_type_id, expected_type_id.value(),
+                                       semantic_ctx, deref_steps))
     {
       return std::nullopt;
     }
@@ -1888,7 +1885,7 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
                          .is_place_ = false,
                          .mut_ = false,
                          .diverges_ = lhs_info.value().diverges_ ||
-                             rhs_info.value().diverges_,
+                                      rhs_info.value().diverges_,
                          .coercion_derefs_ = std::move(deref_steps)};
     if (expected_type_id && expected_type_id.value() != lhs_type_id)
     {
@@ -1908,16 +1905,16 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     TypeId lhs_type_id = lhs_info.value().type_id_;
     TypeId rhs_type_id = rhs_info.value().type_id_;
     bool is_outer = true;
@@ -1972,10 +1969,9 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
         .type_id_ = 4,
         .is_place_ = false,
         .mut_ = false,
-        .diverges_ =
-            lhs_info.value().diverges_ ||
-            rhs_info.value().diverges_,
-        .coercion_derefs_ = std::move(deref_steps)}; // 引用类型的发散性和最里层的发散性相同
+        .diverges_ = lhs_info.value().diverges_ || rhs_info.value().diverges_,
+        .coercion_derefs_ =
+            std::move(deref_steps)}; // 引用类型的发散性和最里层的发散性相同
     if (expected_type_id && expected_type_id.value() != 4)
     {
       result_info.coerced_type_id_ = expected_type_id;
@@ -1992,16 +1988,16 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     // 要求完全相同
     if (lhs_info.value().type_id_ != rhs_info.value().type_id_)
     {
@@ -2021,7 +2017,7 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
                          .is_place_ = false,
                          .mut_ = false,
                          .diverges_ = lhs_info.value().diverges_ ||
-                             rhs_info.value().diverges_,
+                                      rhs_info.value().diverges_,
                          .coercion_derefs_ = std::move(deref_steps)};
     if (expected_type_id && expected_type_id.value() != 4)
     {
@@ -2039,21 +2035,21 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->lhs_.get(), lhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
+                                                     lhs_info.value());
     auto rhs_info = checkExpr(binary_expr->rhs_.get(), semantic_ctx, scope,
                               std::nullopt, func_info);
     if (!rhs_info)
     {
       return std::nullopt;
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-        binary_expr->rhs_.get(), rhs_info.value());
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
+                                                     rhs_info.value());
     // 要求bool是已知期望类型，所以这里支持强制类型转换
     std::vector<DerefKind> lhs_deref_steps;
     std::vector<DerefKind> rhs_deref_steps;
-    if (!canCoerce(lhs_info.value().type_id_, 4,
-                   semantic_ctx, lhs_deref_steps) ||
+    if (!canCoerce(lhs_info.value().type_id_, 4, semantic_ctx,
+                   lhs_deref_steps) ||
         !canCoerce(rhs_info.value().type_id_, 4, semantic_ctx, rhs_deref_steps))
     {
       return std::nullopt;
@@ -2063,14 +2059,14 @@ std::optional<ExprInfo> BodyChecker::checkBinaryExpr(
       lhs_info.value().coerced_type_id_ = 4;
       lhs_info.value().coercion_derefs_ = std::move(lhs_deref_steps);
       semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->lhs_.get(),
-                                                 lhs_info.value());
+                                                       lhs_info.value());
     }
     if (rhs_info.value().type_id_ != 4)
     {
       rhs_info.value().coerced_type_id_ = 4;
       rhs_info.value().coercion_derefs_ = std::move(rhs_deref_steps);
       semantic_ctx.expr_to_exprinfos_.insert_or_assign(binary_expr->rhs_.get(),
-                                                 rhs_info.value());
+                                                       rhs_info.value());
     }
     std::vector<DerefKind> deref_steps;
     if (expected_type_id &&
@@ -2104,8 +2100,8 @@ std::optional<ExprInfo> BodyChecker::checkAssignExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      assign_expr->lhs_.get(), lhs_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(assign_expr->lhs_.get(),
+                                                   lhs_info.value());
   // 左侧要求可写place
   if (!lhs_info.value().is_place_)
   {
@@ -2132,8 +2128,8 @@ std::optional<ExprInfo> BodyChecker::checkAssignExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      assign_expr->rhs_.get(), rhs_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(assign_expr->rhs_.get(),
+                                                   rhs_info.value());
   if (assign_expr->op_ != AssignmentOperator::Assign)
   {
     TypeId lhs_type_id = lhs_info.value().type_id_;
@@ -2206,16 +2202,16 @@ std::optional<ExprInfo> BodyChecker::checkAssignExpr(
   }
   // 赋值表达式返回类型为 unit
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id && !canCoerce(5, expected_type_id.value(),
-                                     semantic_ctx, deref_steps))
+  if (expected_type_id &&
+      !canCoerce(5, expected_type_id.value(), semantic_ctx, deref_steps))
   {
     return std::nullopt;
   }
   ExprInfo result_info{.type_id_ = 5,
                        .is_place_ = false,
                        .mut_ = false,
-                       .diverges_ =
-                           lhs_info.value().diverges_ || rhs_info.value().diverges_,
+                       .diverges_ = lhs_info.value().diverges_ ||
+                                    rhs_info.value().diverges_,
                        .coercion_derefs_ = std::move(deref_steps)};
   if (expected_type_id && expected_type_id.value() != 5)
   {
@@ -2258,14 +2254,14 @@ std::optional<ExprInfo> BodyChecker::checkCastExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      cast_expr->expr_.get(), expr_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(cast_expr->expr_.get(),
+                                                   expr_info.value());
   if (canCast(expr_info.value().type_id_, as_type.value(), semantic_ctx))
   {
     std::vector<DerefKind> deref_steps;
     if (expected_type_id &&
-        !canCoerce(as_type.value(), expected_type_id.value(),
-                   semantic_ctx, deref_steps))
+        !canCoerce(as_type.value(), expected_type_id.value(), semantic_ctx,
+                   deref_steps))
     {
       return std::nullopt;
     }
@@ -2518,7 +2514,7 @@ std::optional<ExprInfo> BodyChecker::checkCallExpr(
           }
           declared_function_id = item_it->second.index_;
         }
-      } 
+      }
       // 优先自己定义的函数
       if (declared_function_id)
       {
@@ -2596,8 +2592,9 @@ std::optional<ExprInfo> BodyChecker::checkCallExpr(
     }
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id && !canCoerce(source_func_info.return_type_id_,
-                                     expected_type_id.value(), semantic_ctx, deref_steps))
+  if (expected_type_id &&
+      !canCoerce(source_func_info.return_type_id_, expected_type_id.value(),
+                 semantic_ctx, deref_steps))
   {
     return std::nullopt;
   }
@@ -2626,8 +2623,8 @@ std::optional<ExprInfo> BodyChecker::checkIndexExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      index_expr->base_.get(), base_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(index_expr->base_.get(),
+                                                   base_info.value());
   TypeId type_id = base_info.value().type_id_;
   bool mut;
   if (base_info.value().is_place_)
@@ -2690,8 +2687,8 @@ std::optional<ExprInfo> BodyChecker::checkIndexExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      index_expr->index_.get(), index_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(index_expr->index_.get(),
+                                                   index_info.value());
   // 只有never和usize满足，但是never需要拒绝
   if (index_info.value().type_id_ != 3)
   {
@@ -2715,9 +2712,8 @@ std::optional<ExprInfo> BodyChecker::checkIndexExpr(
     }
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id &&
-      !canCoerce(element_type_id, expected_type_id.value(),
-                 semantic_ctx, deref_steps))
+  if (expected_type_id && !canCoerce(element_type_id, expected_type_id.value(),
+                                     semantic_ctx, deref_steps))
   {
     return std::nullopt;
   }
@@ -2758,8 +2754,8 @@ std::optional<ExprInfo> BodyChecker::checkMemberExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      member_expr->base_.get(), expr_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(member_expr->base_.get(),
+                                                   expr_info.value());
   TypeId type_id = expr_info.value().type_id_;
   bool mut = expr_info.value().mut_; // 初始是否mut
   if (!expr_info.value().is_place_)  // 临时物化
@@ -2803,7 +2799,8 @@ std::optional<ExprInfo> BodyChecker::checkMemberExpr(
     {
       mut = false;
     }
-    else if (dynamic_cast<const ReferenceSemType *>(&type)) // &mut可以在没有经过共享引用的时候赋予mut
+    else if (dynamic_cast<const ReferenceSemType *>(
+                 &type)) // &mut可以在没有经过共享引用的时候赋予mut
     {
       mut = true;
     }
@@ -2830,8 +2827,9 @@ std::optional<ExprInfo> BodyChecker::checkMemberExpr(
     return std::nullopt;
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id && !canCoerce(member_type_id.value(),
-                                     expected_type_id.value(), semantic_ctx, deref_steps))
+  if (expected_type_id &&
+      !canCoerce(member_type_id.value(), expected_type_id.value(), semantic_ctx,
+                 deref_steps))
   {
     return std::nullopt;
   }
@@ -3006,8 +3004,9 @@ BodyChecker::checkMethodCallExpr(const MethodCallExpr *method_call_expr,
     }
   }
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id && !canCoerce(method_info.return_type_id_,
-                                     expected_type_id.value(), semantic_ctx, deref_steps))
+  if (expected_type_id &&
+      !canCoerce(method_info.return_type_id_, expected_type_id.value(),
+                 semantic_ctx, deref_steps))
   {
     return std::nullopt;
   }
@@ -3020,7 +3019,8 @@ BodyChecker::checkMethodCallExpr(const MethodCallExpr *method_call_expr,
                        .base_derefs_ = std::move(base_derefs),
                        .receiver_adjustment_ = receiver_adjustment,
                        .call_target_ = method_info.call_target_};
-  if (expected_type_id && expected_type_id.value() != method_info.return_type_id_)
+  if (expected_type_id &&
+      expected_type_id.value() != method_info.return_type_id_)
   {
     result_info.coerced_type_id_ = expected_type_id;
   }
@@ -3040,8 +3040,8 @@ std::optional<ExprInfo> BodyChecker::checkLoopExpr(
   {
     return std::nullopt;
   }
-  semantic_ctx.expr_to_exprinfos_.insert_or_assign(
-      loop_expr->block_expr_.get(), body_info.value());
+  semantic_ctx.expr_to_exprinfos_.insert_or_assign(loop_expr->block_expr_.get(),
+                                                   body_info.value());
   auto loop_info = std::move(loop_stack_.back());
   loop_stack_.pop_back();
   // 若无break, loop发散
@@ -3091,8 +3091,8 @@ std::optional<ExprInfo> BodyChecker::checkLoopExpr(
     }
     auto &expr_info = break_value_info.expr_info_;
     std::vector<DerefKind> deref_steps;
-    if (!canCoerce(expr_info.type_id_, result_type_id.value(),
-                   semantic_ctx, deref_steps))
+    if (!canCoerce(expr_info.type_id_, result_type_id.value(), semantic_ctx,
+                   deref_steps))
     {
       return std::nullopt;
     }
@@ -3111,7 +3111,8 @@ std::optional<ExprInfo> BodyChecker::checkLoopExpr(
       expr_info.coerced_type_id_ = result_type_id.value();
       expr_info.coercion_derefs_ = std::move(deref_steps);
     }
-    semantic_ctx.expr_to_exprinfos_.insert_or_assign(break_value_info.expr_, expr_info);
+    semantic_ctx.expr_to_exprinfos_.insert_or_assign(break_value_info.expr_,
+                                                     expr_info);
   }
   return ExprInfo{.type_id_ = result_type_id.value(),
                   .is_place_ = false,
@@ -3150,18 +3151,17 @@ std::optional<ExprInfo> BodyChecker::checkWhileExpr(
       while_expr->block_expr_.get(), body_info.value());
   loop_stack_.pop_back();
   std::vector<DerefKind> deref_steps;
-  if (expected_type_id &&
-      !canCoerce(5, expected_type_id.value(),
-                 semantic_ctx, deref_steps)) // while类型为()
+  if (expected_type_id && !canCoerce(5, expected_type_id.value(), semantic_ctx,
+                                     deref_steps)) // while类型为()
   {
     return std::nullopt;
   }
   ExprInfo result_info{.type_id_ = 5,
                        .is_place_ = false,
                        .mut_ = false,
-                       .diverges_ =
-                           condition_info.value().diverges_,
-                       .coercion_derefs_ = std::move(deref_steps)}; // 和条件同发散
+                       .diverges_ = condition_info.value().diverges_,
+                       .coercion_derefs_ =
+                           std::move(deref_steps)}; // 和条件同发散
   if (expected_type_id && expected_type_id.value() != 5)
   {
     result_info.coerced_type_id_ = expected_type_id;

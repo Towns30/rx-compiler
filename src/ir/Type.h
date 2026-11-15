@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Ids.h"
 #include <cstddef>
 #include <string>
 #include <variant>
@@ -31,11 +32,15 @@ struct ArrayIRType
 
 struct StructIRType
 {
-  std::string name_;
-  std::vector<IRTypeId> fields_;
+  StructId struct_id_;
 };
 
-using IRType =
-    std::variant<VoidIRType, IntegerIRType, PointerIRType, ArrayIRType, StructIRType>;
+struct VecIRType
+{
+  // 按 data、len、capacity 三个字段存储。
+  IRTypeId element_type_id_;
+};
+
+using IRType = std::variant<VoidIRType, IntegerIRType, PointerIRType, ArrayIRType, StructIRType, VecIRType>;
 
 } // namespace ir

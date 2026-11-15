@@ -59,8 +59,8 @@ int main(int argc, char *argv[])
   AstBuilder ast_builder;
   // printTree(tree, parser);
   auto ast_tree = ast_builder.Build(tree);
-  SemanticAnalyzer semantic_analyzer;
-  SemanticContext semantic_context;
+  semantic::SemanticAnalyzer semantic_analyzer;
+  semantic::SemanticContext semantic_context;
   if (!semantic_analyzer.SemanticCheck(*(ast_tree.get()), semantic_context))
   {
     return 1;

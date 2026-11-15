@@ -1,32 +1,32 @@
-#include "Context.h"
+#include "IRTypeTable.h"
 #include <cassert>
 #include <utility>
 
 namespace ir
 {
 
-IRContext::IRContext()
+IRTypeTable::IRTypeTable()
 {
   types_.push_back(VoidIRType{}); // void 0
   types_.push_back(PointerIRType{}); // ptr 1
 }
 
-IRType IRContext::getType(IRTypeId id)
+IRType IRTypeTable::getType(IRTypeId id)
 {
   return types_.at(id);
 }
 
-std::size_t IRContext::getTypeCount() const
+std::size_t IRTypeTable::getTypeCount() const
 {
   return types_.size();
 }
 
-IRTypeId IRContext::getOrCreateVoidType()
+IRTypeId IRTypeTable::getOrCreateVoidType()
 {
   return 0;
 }
 
-IRTypeId IRContext::getOrCreateIntegerType(unsigned bit_width)
+IRTypeId IRTypeTable::getOrCreateIntegerType(unsigned bit_width)
 {
   for (std::size_t i = 0; i < types_.size(); i++)
   {
@@ -45,12 +45,12 @@ IRTypeId IRContext::getOrCreateIntegerType(unsigned bit_width)
   return type_id;
 }
 
-IRTypeId IRContext::getOrCreatePointerType()
+IRTypeId IRTypeTable::getOrCreatePointerType()
 {
   return 1;
 }
 
-IRTypeId IRContext::getOrCreateArrayType(IRTypeId element_type, std::size_t length)
+IRTypeId IRTypeTable::getOrCreateArrayType(IRTypeId element_type, std::size_t length)
 {
   for (std::size_t i = 0; i < types_.size(); i++)
   {
@@ -70,17 +70,28 @@ IRTypeId IRContext::getOrCreateArrayType(IRTypeId element_type, std::size_t leng
   return type_id;
 }
 
-IRTypeId IRContext::createStructType(std::string name)
+IRTypeId IRTypeTable::createStructType(StructId struct_id)
 {
   IRTypeId type_id = types_.size();
-  types_.push_back(StructIRType{.name_ = std::move(name), .fields_ = {}});
+  types_.push_back(StructIRType{.struct_id_ = struct_id});
   return type_id;
 }
 
-void IRContext::setStructFields(IRTypeId id, std::vector<IRTypeId> fields)
+std::optional<IRTypeId> IRTypeTable::getStructIRTypeId(StructId struct_id) const
 {
-  auto &struct_type = std::get<StructIRType>(types_.at(id));
-  struct_type.fields_ = std::move(fields);
+  for (IRTypeId type_id = 0; type_id < types_.size(); type_id++)
+  {
+    const auto *struct_type = std::get_if<StructIRType>(&types_[type_id]);
+    if (!struct_type)
+    {
+      continue;
+    }
+    if (struct_type->struct_id_ == struct_id)
+    {
+      return type_id;
+    }
+  }
+  return std::nullopt;
 }
 
 } // namespace ir

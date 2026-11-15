@@ -1,14 +1,15 @@
 #include "IRPrinter.h"
+#include <algorithm>
 #include <stdexcept>
 
 namespace ir
 {
-IRPrinter::IRPrinter(IRContext &ir_context, std::ostream &output)
-    : ir_context_(ir_context), output_(output)
+IRPrinter::IRPrinter(IRTypeTable &ir_type_table, std::ostream &output)
+    : ir_type_table_(ir_type_table), output_(output)
 {
 }
 
-// 函数定义和调用统一使用编号作为符号名。
+// 函数定义和调用统一使用编号作为符号名
 void IRPrinter::printFunctionName(FunctionId func_id)
 {
   output_ << "@f" << func_id;
@@ -17,29 +18,37 @@ void IRPrinter::printFunctionName(FunctionId func_id)
 void IRPrinter::printIR(const Module &module)
 {
   output_ << "target triple = \"riscv32-unknown-elf\"\n\n";
-  // 打印所有结构体定义
-  for (IRTypeId type_id = 0; type_id < ir_context_.getTypeCount(); type_id++)
+  // 按编号打印，避免 unordered_map 的遍历顺序影响输出。
+  std::vector<StructId> struct_ids;
+  for (const auto &entry : module.structs_)
   {
-    IRType type = ir_context_.getType(type_id);
-    const auto *struct_type = std::get_if<StructIRType>(&type);
-    if (!struct_type)
-    {
-      continue;
-    }
-    output_ << "%s" << type_id << " = type { ";
-    for (std::size_t i = 0; i < struct_type->fields_.size(); i++)
+    struct_ids.push_back(entry.first);
+  }
+  std::sort(struct_ids.begin(), struct_ids.end());
+  for (StructId struct_id : struct_ids)
+  {
+    const Struct &structure = module.structs_.at(struct_id);
+    output_ << "%s" << structure.struct_id_ << " = type { ";
+    for (std::size_t i = 0; i < structure.types_.size(); i++)
     {
       if (i != 0)
       {
         output_ << ", ";
       }
-      printType(struct_type->fields_[i]);
+      printType(structure.types_[i]);
     }
     output_ << " }\n";
   }
   output_ << '\n';
-  for (const Function &function : module.functions_)
+  std::vector<FunctionId> function_ids;
+  for (const auto &entry : module.functions_)
   {
+    function_ids.push_back(entry.first);
+  }
+  std::sort(function_ids.begin(), function_ids.end());
+  for (FunctionId function_id : function_ids)
+  {
+    const Function &function = module.functions_.at(function_id);
     printFunction(function);
     output_ << '\n';
   }
@@ -81,10 +90,10 @@ void IRPrinter::printFunction(const Function &function)
     return;
   }
   output_ << " {\n";
-  for (BlockId block_id = 0; block_id < function.basic_blocks_.size(); block_id++)
+  for (const BasicBlock &block : function.basic_blocks_)
   {
-    output_ << "bb" << block_id << ":\n";
-    for (const Instruction &instruction : function.basic_blocks_[block_id].instructions_)
+    output_ << "bb" << block.block_id_ << ":\n";
+    for (const Instruction &instruction : block.instructions_)
     {
       output_ << "  ";
       printInstruction(instruction);
@@ -95,7 +104,7 @@ void IRPrinter::printFunction(const Function &function)
 
 void IRPrinter::printType(IRTypeId type_id)
 {
-  IRType type = ir_context_.getType(type_id);
+  IRType type = ir_type_table_.getType(type_id);
   if (std::get_if<VoidIRType>(&type))
   {
     output_ << "void";
@@ -114,10 +123,9 @@ void IRPrinter::printType(IRTypeId type_id)
     printType(array_type->element_type_id_);
     output_ << ']';
   }
-  else if (std::get_if<StructIRType>(&type))
+  else if (const auto *struct_type = std::get_if<StructIRType>(&type))
   {
-    // 使用类型编号区分同名结构体，定义在模块打印阶段输出
-    output_ << "%s" << type_id;
+    output_ << "%s" << struct_type->struct_id_;
   }
 }
 
@@ -129,7 +137,7 @@ void IRPrinter::printOperand(const Operand &operand)
     return;
   }
   const auto &constant = std::get<IntegerConst>(operand);
-  IRType type = ir_context_.getType(constant.type_id_);
+  IRType type = ir_type_table_.getType(constant.type_id_);
   const auto *integer_type = std::get_if<IntegerIRType>(&type);
   if (!integer_type || integer_type->bit_width_ == 0 ||
       integer_type->bit_width_ > 64)
@@ -148,19 +156,32 @@ static const char *getBinaryName(BinaryOp op)
 {
   switch (op)
   {
-  case BinaryOp::Add: return "add";
-  case BinaryOp::Sub: return "sub";
-  case BinaryOp::Mul: return "mul";
-  case BinaryOp::SignedDiv: return "sdiv";
-  case BinaryOp::UnsignedDiv: return "udiv";
-  case BinaryOp::SignedRem: return "srem";
-  case BinaryOp::UnsignedRem: return "urem";
-  case BinaryOp::BitAnd: return "and";
-  case BinaryOp::BitOr: return "or";
-  case BinaryOp::BitXor: return "xor";
-  case BinaryOp::ShiftLeft: return "shl";
-  case BinaryOp::LogicalShiftRight: return "lshr";
-  case BinaryOp::ArithmeticShiftRight: return "ashr";
+  case BinaryOp::Add:
+    return "add";
+  case BinaryOp::Sub:
+    return "sub";
+  case BinaryOp::Mul:
+    return "mul";
+  case BinaryOp::SignedDiv:
+    return "sdiv";
+  case BinaryOp::UnsignedDiv:
+    return "udiv";
+  case BinaryOp::SignedRem:
+    return "srem";
+  case BinaryOp::UnsignedRem:
+    return "urem";
+  case BinaryOp::BitAnd:
+    return "and";
+  case BinaryOp::BitOr:
+    return "or";
+  case BinaryOp::BitXor:
+    return "xor";
+  case BinaryOp::ShiftLeft:
+    return "shl";
+  case BinaryOp::LogicalShiftRight:
+    return "lshr";
+  case BinaryOp::ArithmeticShiftRight:
+    return "ashr";
   }
 }
 
@@ -168,16 +189,26 @@ static const char *getCompareName(CompareOp op)
 {
   switch (op)
   {
-  case CompareOp::Equal: return "eq";
-  case CompareOp::NotEqual: return "ne";
-  case CompareOp::SignedLess: return "slt";
-  case CompareOp::SignedLessEqual: return "sle";
-  case CompareOp::SignedGreater: return "sgt";
-  case CompareOp::SignedGreaterEqual: return "sge";
-  case CompareOp::UnsignedLess: return "ult";
-  case CompareOp::UnsignedLessEqual: return "ule";
-  case CompareOp::UnsignedGreater: return "ugt";
-  case CompareOp::UnsignedGreaterEqual: return "uge";
+  case CompareOp::Equal:
+    return "eq";
+  case CompareOp::NotEqual:
+    return "ne";
+  case CompareOp::SignedLess:
+    return "slt";
+  case CompareOp::SignedLessEqual:
+    return "sle";
+  case CompareOp::SignedGreater:
+    return "sgt";
+  case CompareOp::SignedGreaterEqual:
+    return "sge";
+  case CompareOp::UnsignedLess:
+    return "ult";
+  case CompareOp::UnsignedLessEqual:
+    return "ule";
+  case CompareOp::UnsignedGreater:
+    return "ugt";
+  case CompareOp::UnsignedGreaterEqual:
+    return "uge";
   }
 }
 
@@ -185,24 +216,36 @@ static const char *getCastName(CastOp op)
 {
   switch (op)
   {
-  case CastOp::Trunc: return "trunc";
-  case CastOp::ZeroExt: return "zext";
-  case CastOp::SignExt: return "sext";
+  case CastOp::Trunc:
+    return "trunc";
+  case CastOp::ZeroExt:
+    return "zext";
+  case CastOp::SignExt:
+    return "sext";
   }
-}
-
-static IRTypeId getOperandTypeId(const Operand &operand)
-{
-  if (const auto *value = std::get_if<Value>(&operand))
-  {
-    return value->type_id_;
-  }
-  return std::get<IntegerConst>(operand).type_id_;
 }
 
 void IRPrinter::printInstruction(const Instruction &instruction)
 {
-  if (const auto *inst = std::get_if<AllocaInst>(&instruction))
+  if (const auto *inst = std::get_if<PhiInst>(&instruction))
+  {
+    printOperand(inst->return_value_);
+    output_ << " = phi ";
+    printType(inst->return_value_.type_id_);
+    output_ << ' ';
+    for (std::size_t i = 0; i < inst->incomings_.size(); i++)
+    {
+      if (i != 0)
+      {
+        output_ << ", ";
+      }
+      const PhiIncoming &incoming = inst->incomings_[i];
+      output_ << "[ ";
+      printOperand(incoming.operand_);
+      output_ << ", %bb" << incoming.block_id_ << " ]";
+    }
+  }
+  else if (const auto *inst = std::get_if<AllocaInst>(&instruction))
   {
     output_ << "%v" << inst->return_ptr_.value_id_ << " = alloca ";
     printType(inst->type_id_);
@@ -300,8 +343,8 @@ void IRPrinter::printInstruction(const Instruction &instruction)
   {
     output_ << "br i1 ";
     printOperand(inst->cond_operand_);
-    output_ << ", label %bb" << inst->true_block_id_
-            << ", label %bb" << inst->false_block_id_;
+    output_ << ", label %bb" << inst->true_block_id_ << ", label %bb"
+            << inst->false_block_id_;
   }
   else if (const auto *inst = std::get_if<ReturnInst>(&instruction))
   {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Context.h"
-#include "IR.h"
+#include "IRSymbol.h"
+#include "IRTypeTable.h"
 #include <ostream>
 
 namespace ir
@@ -10,7 +10,7 @@ namespace ir
 class IRPrinter
 {
 public:
-  IRPrinter(IRContext &ir_context, std::ostream &output);
+  IRPrinter(IRTypeTable &ir_type_table, std::ostream &output);
   void printIR(const Module &module);
   void printType(IRTypeId type_id);
   void printOperand(const Operand &operand);
@@ -20,7 +20,7 @@ private:
   void printFunction(const Function &function);
   void printFunctionName(FunctionId func_id);
 
-  IRContext &ir_context_;
+  IRTypeTable &ir_type_table_;
   std::ostream &output_;
 };
 
