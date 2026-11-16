@@ -6,6 +6,7 @@
 #include "Type.h"
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace ir
 {
@@ -17,6 +18,15 @@ public:
   IRGenerator(const Crate *crate) : crate_(crate) {}
 
 private:
+  struct LoopContext
+  {
+    BlockId continue_block_id_;
+    // while 直接创建out，loop 在首次生成不终止 break 时创建loop_out
+    std::optional<BlockId> break_block_id_ = std::nullopt;
+    // 只记录不终止的的 break
+    std::vector<PhiIncoming> break_incomings_;
+  };
+
   // 约定若终止operand为空
   ExprResult generateExpr(const Expr *expr,
                           semantic::SemanticContext &semantic_ctx);
@@ -120,6 +130,7 @@ private:
   std::unordered_map<semantic::TypeId, IRTypeId>
       semantic_type_id_to_ir_type_id_;
   std::unordered_map<semantic::LocalId, Value> localid_to_place_;
+  std::vector<LoopContext> loop_stack_;
 
   std::optional<FunctionId> current_function_id_ = std::nullopt;
   std::optional<BlockId> current_block_id_ = std::nullopt;

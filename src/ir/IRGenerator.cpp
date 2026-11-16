@@ -800,6 +800,35 @@ ExprResult IRGenerator::generateOrderingExpr(
                     .operand_ = emitCompare(compare_op, lhs_operand, rhs_operand)};
 }
 
+ExprResult IRGenerator::generateWhileExpr(
+    const WhileExpr *while_expr, semantic::SemanticContext &semantic_ctx)
+{
+  BlockId condition_block_id = newBlock();
+  emitJump(condition_block_id);
+  setInsertPoint(condition_block_id);
+  ExprResult condition_result = generateExpr(while_expr->condition_expr_.get(), semantic_ctx);
+  if (condition_result.terminated_)
+  {
+    return condition_result;
+  }
+  BlockId body_block_id = newBlock();
+  BlockId out_block_id = newBlock();
+  emitBranch(condition_result.operand_.value(), body_block_id, out_block_id);
+  loop_stack_.push_back(LoopContext{.continue_block_id_ = condition_block_id,
+                                    .break_block_id_ = out_block_id,
+                                    .break_incomings_ = {}});
+  setInsertPoint(body_block_id);
+  ExprResult body_result = generateExpr(while_expr->block_expr_.get(), semantic_ctx);
+  if (!body_result.terminated_)
+  {
+    emitJump(condition_block_id);
+  }
+  loop_stack_.pop_back();
+  // 只有block终止没事，可以直接跳到out块，while返回unit
+  setInsertPoint(out_block_id);
+  return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
+}
+
 ExprResult IRGenerator::generateIfExpr(
     const IfExpr *if_expr, semantic::SemanticContext &semantic_ctx)
 {
