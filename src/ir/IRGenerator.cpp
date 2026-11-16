@@ -820,6 +820,13 @@ IRGenerator::generateOrderingExpr(const BinaryExpr *binary_expr,
                         emitCompare(compare_op, lhs_operand, rhs_operand)};
 }
 
+ExprResult IRGenerator::generateContinueExpr(
+    const ContinueExpr *continue_expr, semantic::SemanticContext &semantic_ctx)
+{
+  emitJump(loop_stack_.back().continue_block_id_);
+  return ExprResult{.terminated_ = true, .operand_ = std::nullopt};
+}
+
 ExprResult IRGenerator::generateBreakExpr(
     const BreakExpr *break_expr, semantic::SemanticContext &semantic_ctx)
 {
