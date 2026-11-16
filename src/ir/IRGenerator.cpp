@@ -800,6 +800,94 @@ ExprResult IRGenerator::generateOrderingExpr(
                     .operand_ = emitCompare(compare_op, lhs_operand, rhs_operand)};
 }
 
+ExprResult IRGenerator::generateIfExpr(
+    const IfExpr *if_expr, semantic::SemanticContext &semantic_ctx)
+{
+  ExprResult condition_result = generateExpr(if_expr->condition_expr_.get(), semantic_ctx);
+  if (condition_result.terminated_)
+  {
+    return condition_result;
+  }
+  if (if_expr->has_else_)
+  {
+    BlockId then_block_id = newBlock();
+    BlockId else_block_id = newBlock();
+    emitBranch(condition_result.operand_.value(), then_block_id, else_block_id);
+    // then
+    setInsertPoint(then_block_id);
+    ExprResult then_result = generateExpr(if_expr->block_expr_.get(), semantic_ctx);
+    BlockId then_end_block_id = getCurrentBlock().block_id_;
+    // else or else if
+    setInsertPoint(else_block_id);
+    ExprResult else_result;
+    if (if_expr->is_else_if_)
+    {
+      else_result = generateExpr(if_expr->else_if_expr_.get(), semantic_ctx);
+    }
+    else
+    {
+      else_result = generateExpr(if_expr->else_block_expr_.get(), semantic_ctx);
+    }
+    BlockId else_end_block_id = getCurrentBlock().block_id_;
+    // 都终止则不生成 merge
+    if (then_result.terminated_ && else_result.terminated_)
+    {
+      return ExprResult{.terminated_ = true, .operand_ = std::nullopt};
+    }
+    // 至少一侧正常结束时，才创建合并块
+    BlockId merge_block_id = newBlock();
+    if (!then_result.terminated_)
+    {
+      setInsertPoint(then_end_block_id);
+      emitJump(merge_block_id);
+    }
+    if (!else_result.terminated_)
+    {
+      setInsertPoint(else_end_block_id);
+      emitJump(merge_block_id);
+    }
+    setInsertPoint(merge_block_id);
+    // 只有一侧正常结束，直接转发该侧结果
+    if (then_result.terminated_)
+    {
+      return else_result;
+    }
+    if (else_result.terminated_)
+    {
+      return then_result;
+    }
+    // 若block有值
+    if (then_result.operand_.has_value())
+    {
+      std::vector<PhiIncoming> incomings;
+      incomings.push_back(PhiIncoming{.block_id_ = then_end_block_id,
+                                       .operand_ = then_result.operand_.value()});
+      incomings.push_back(PhiIncoming{.block_id_ = else_end_block_id,
+                                       .operand_ = else_result.operand_.value()});
+      IRTypeId type_id = getOperandTypeId(then_result.operand_.value());
+      return ExprResult{
+          .terminated_ = false,
+          .operand_ = emitPhi(type_id, std::move(incomings))};
+    }
+    // 无值则返回 unit
+    return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
+  }
+  // 无 else
+  BlockId then_block_id = newBlock();
+  BlockId merge_block_id = newBlock();
+  emitBranch(condition_result.operand_.value(), then_block_id, merge_block_id);
+  setInsertPoint(then_block_id);
+  ExprResult then_result = generateExpr(if_expr->block_expr_.get(), semantic_ctx);
+  // then 不终止需要最后 jump 回 merge
+  if (!then_result.terminated_)
+  {
+    emitJump(merge_block_id);
+  }
+  // 最后返回merge块，无else时结果为unit
+  setInsertPoint(merge_block_id);
+  return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
+}
+
 ExprResult IRGenerator::generateLogicalExpr(
     const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
 {
