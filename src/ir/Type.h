@@ -37,7 +37,7 @@ struct StructIRType
 
 struct VecIRType
 {
-  // 按 data、len、capacity 三个字段存储。
+  // 实现为结构体{ptr, i32, i32}
   IRTypeId element_type_id_;
 };
 

@@ -70,6 +70,25 @@ IRTypeId IRTypeTable::getOrCreateArrayType(IRTypeId element_type, std::size_t le
   return type_id;
 }
 
+IRTypeId IRTypeTable::getOrCreateVecType(IRTypeId element_type_id)
+{
+  for (std::size_t i = 0; i < types_.size(); i++)
+  {
+    const auto *vec_type = std::get_if<VecIRType>(&types_[i]);
+    if (!vec_type)
+    {
+      continue;
+    }
+    if (vec_type->element_type_id_ == element_type_id)
+    {
+      return i;
+    }
+  }
+  IRTypeId type_id = types_.size();
+  types_.push_back(VecIRType{.element_type_id_ = element_type_id});
+  return type_id;
+}
+
 IRTypeId IRTypeTable::createStructType(StructId struct_id)
 {
   IRTypeId type_id = types_.size();
