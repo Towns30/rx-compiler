@@ -820,6 +820,37 @@ IRGenerator::generateOrderingExpr(const BinaryExpr *binary_expr,
                         emitCompare(compare_op, lhs_operand, rhs_operand)};
 }
 
+ExprResult IRGenerator::generateBreakExpr(
+    const BreakExpr *break_expr, semantic::SemanticContext &semantic_ctx)
+{
+  ExprResult value_result;
+  if (break_expr->value_)
+  {
+    value_result = generateExpr(break_expr->value_.get(), semantic_ctx);
+    if (value_result.terminated_)
+    {
+      return value_result;
+    }
+  }
+  // 操作数可能包含嵌套循环，生成完后再取得当前循环上下文
+  auto &context = loop_stack_.back();
+  if (!context.break_block_id_.has_value())
+  {
+    // loop中第一次能跳出去，创建loop_out
+    context.break_block_id_ = newBlock();
+  }
+  if (value_result.operand_.has_value())
+  {
+    // 有返回值，且真能break出去
+    context.break_incomings_.push_back(
+        PhiIncoming{.block_id_ = getCurrentBlock().block_id_,
+                     .operand_ = value_result.operand_.value()});
+  }
+  // jump到loop_out
+  emitJump(context.break_block_id_.value());
+  return ExprResult{.terminated_ = true, .operand_ = std::nullopt};
+}
+
 ExprResult
 IRGenerator::generateLoopExpr(const LoopExpr *loop_expr,
                               semantic::SemanticContext &semantic_ctx)
@@ -851,7 +882,7 @@ IRGenerator::generateLoopExpr(const LoopExpr *loop_expr,
   }
   if (context.break_incomings_.size() == 1)
   {
-    // 一个break不用
+    // 一个break不用创建phi
     return ExprResult{.terminated_ = false,
                       .operand_ = context.break_incomings_[0].operand_};
   }
