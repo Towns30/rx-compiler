@@ -366,9 +366,12 @@ ExprResult IRGenerator::getPlaceAddress(const Expr *expr,
       }
     }
     // 最后base_type_id为struct或array类型
-    IRTypeId index_type_id = module_.ir_type_table_.getOrCreateIntegerType(32); // i32
+    IRTypeId index_type_id =
+        module_.ir_type_table_.getOrCreateIntegerType(32); // i32
     std::vector<Operand> indices;
-    indices.push_back(IntegerConst{.value_ = 0, .type_id_ = index_type_id}); // 第一个以struct或array为单位，不动
+    indices.push_back(IntegerConst{
+        .value_ = 0,
+        .type_id_ = index_type_id}); // 第一个以struct或array为单位，不动
     // member字段号已记录
     if (member_expr)
     {
@@ -391,8 +394,8 @@ ExprResult IRGenerator::getPlaceAddress(const Expr *expr,
       }
       indices.push_back(index_result.operand_.value());
     }
-    Value result = emitGetElementPtr(
-        lowerType(base_type_id, semantic_ctx), base_ptr, std::move(indices));
+    Value result = emitGetElementPtr(lowerType(base_type_id, semantic_ctx),
+                                     base_ptr, std::move(indices));
     return ExprResult{.terminated_ = false, .operand_ = result};
   }
   // 值表达式临时物化一个地址
@@ -466,8 +469,9 @@ IRGenerator::generatePathExpr(const PathExpr *path_expr,
   }
 }
 
-ExprResult IRGenerator::generateBinaryExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateBinaryExpr(const BinaryExpr *binary_expr,
+                                semantic::SemanticContext &semantic_ctx)
 {
   if (binary_expr->op_ == BinaryOperator::LogicalAnd ||
       binary_expr->op_ == BinaryOperator::LogicalOr)
@@ -511,8 +515,9 @@ ExprResult IRGenerator::generateBinaryExpr(
   }
 }
 
-ExprResult IRGenerator::generateShiftExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateShiftExpr(const BinaryExpr *binary_expr,
+                               semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -526,8 +531,10 @@ ExprResult IRGenerator::generateShiftExpr(
   }
   Operand lhs_operand = lhs_result.operand_.value();
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
-  const auto &rhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
+  const auto &rhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
   semantic::TypeId lhs_type_id = lhs_info.type_id_;
   semantic::TypeId rhs_type_id = rhs_info.type_id_;
   // 解引用
@@ -548,7 +555,8 @@ ExprResult IRGenerator::generateShiftExpr(
   bool is_signed = false;
   const auto &scalar_type = semantic_ctx.getType(lhs_type_id);
   // 是否有符号由lhs决定
-  if (auto integer_type = dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
+  if (auto integer_type =
+          dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
   {
     is_signed = integer_type->integer_type_ == IntegerType::I32 ||
                 integer_type->integer_type_ == IntegerType::ISize;
@@ -574,8 +582,9 @@ ExprResult IRGenerator::generateShiftExpr(
                     .operand_ = emitBinary(op, lhs_operand, rhs_operand)};
 }
 
-ExprResult IRGenerator::generateBitwiseExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateBitwiseExpr(const BinaryExpr *binary_expr,
+                                 semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -589,20 +598,22 @@ ExprResult IRGenerator::generateBitwiseExpr(
   }
   Operand lhs_operand = lhs_result.operand_.value();
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
-  const auto &rhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
+  const auto &rhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
   semantic::TypeId lhs_type_id = lhs_info.type_id_;
   semantic::TypeId rhs_type_id = rhs_info.type_id_;
   // &T
   if (auto reference_type = dynamic_cast<const semantic::ReferenceSemType *>(
-             &semantic_ctx.getType(lhs_type_id)))
+          &semantic_ctx.getType(lhs_type_id)))
   {
     lhs_type_id = reference_type->inner_type_id_;
     auto ptr = std::get_if<Value>(&lhs_operand);
     lhs_operand = emitLoad(lowerType(lhs_type_id, semantic_ctx), *ptr);
   }
   if (auto reference_type = dynamic_cast<const semantic::ReferenceSemType *>(
-             &semantic_ctx.getType(rhs_type_id)))
+          &semantic_ctx.getType(rhs_type_id)))
   {
     rhs_type_id = reference_type->inner_type_id_;
     auto ptr = std::get_if<Value>(&rhs_operand);
@@ -626,8 +637,9 @@ ExprResult IRGenerator::generateBitwiseExpr(
                     .operand_ = emitBinary(op, lhs_operand, rhs_operand)};
 }
 
-ExprResult IRGenerator::generateArithmeticExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateArithmeticExpr(const BinaryExpr *binary_expr,
+                                    semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -641,20 +653,22 @@ ExprResult IRGenerator::generateArithmeticExpr(
   }
   Operand lhs_operand = lhs_result.operand_.value();
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
-  const auto &rhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
+  const auto &rhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
   semantic::TypeId lhs_type_id = lhs_info.type_id_;
   semantic::TypeId rhs_type_id = rhs_info.type_id_;
   // &T
   if (auto reference_type = dynamic_cast<const semantic::ReferenceSemType *>(
-             &semantic_ctx.getType(lhs_type_id)))
+          &semantic_ctx.getType(lhs_type_id)))
   {
     lhs_type_id = reference_type->inner_type_id_;
     auto ptr = std::get_if<Value>(&lhs_operand);
     lhs_operand = emitLoad(lowerType(lhs_type_id, semantic_ctx), *ptr);
   }
   if (auto reference_type = dynamic_cast<const semantic::ReferenceSemType *>(
-             &semantic_ctx.getType(rhs_type_id)))
+          &semantic_ctx.getType(rhs_type_id)))
   {
     rhs_type_id = reference_type->inner_type_id_;
     auto ptr = std::get_if<Value>(&rhs_operand);
@@ -663,7 +677,8 @@ ExprResult IRGenerator::generateArithmeticExpr(
   bool is_signed = false;
   const auto &scalar_type = semantic_ctx.getType(lhs_type_id);
   // 是否有符号由lhs决定，由于左右类型一样
-  if (auto integer_type = dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
+  if (auto integer_type =
+          dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
   {
     is_signed = integer_type->integer_type_ == IntegerType::I32 ||
                 integer_type->integer_type_ == IntegerType::ISize;
@@ -708,8 +723,9 @@ ExprResult IRGenerator::generateArithmeticExpr(
                     .operand_ = emitBinary(op, lhs_operand, rhs_operand)};
 }
 
-ExprResult IRGenerator::generateOrderingExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateOrderingExpr(const BinaryExpr *binary_expr,
+                                  semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -723,8 +739,10 @@ ExprResult IRGenerator::generateOrderingExpr(
   }
   Operand lhs_operand = lhs_result.operand_.value();
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
-  const auto &rhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
+  const auto &rhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->rhs_.get());
   semantic::TypeId lhs_type_id = lhs_info.type_id_;
   semantic::TypeId rhs_type_id = rhs_info.type_id_;
   // 解引用
@@ -745,7 +763,8 @@ ExprResult IRGenerator::generateOrderingExpr(
   bool is_signed = false;
   const auto &scalar_type = semantic_ctx.getType(lhs_type_id);
   // 是否有符号由lhs决定
-  if (auto integer_type = dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
+  if (auto integer_type =
+          dynamic_cast<const semantic::IntegerSemType *>(&scalar_type))
   {
     is_signed = integer_type->integer_type_ == IntegerType::I32 ||
                 integer_type->integer_type_ == IntegerType::ISize;
@@ -797,16 +816,60 @@ ExprResult IRGenerator::generateOrderingExpr(
     }
   }
   return ExprResult{.terminated_ = false,
-                    .operand_ = emitCompare(compare_op, lhs_operand, rhs_operand)};
+                    .operand_ =
+                        emitCompare(compare_op, lhs_operand, rhs_operand)};
 }
 
-ExprResult IRGenerator::generateWhileExpr(
-    const WhileExpr *while_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateLoopExpr(const LoopExpr *loop_expr,
+                              semantic::SemanticContext &semantic_ctx)
+{
+  BlockId loop_body_block_id = newBlock();
+  emitJump(loop_body_block_id);
+  loop_stack_.push_back(LoopContext{.continue_block_id_ = loop_body_block_id,
+                                    .break_block_id_ = std::nullopt,
+                                    .break_incomings_ = {}});
+  setInsertPoint(loop_body_block_id);
+  ExprResult body_result =
+      generateExpr(loop_expr->block_expr_.get(), semantic_ctx);
+  if (!body_result.terminated_)
+  {
+    emitJump(loop_body_block_id);
+  }
+  LoopContext context = std::move(loop_stack_.back());
+  loop_stack_.pop_back();
+  if (!context.break_block_id_.has_value())
+  {
+    // 没创建loop_out，说明根本没跳出来过，返回终止
+    return ExprResult{.terminated_ = true, .operand_ = std::nullopt};
+  }
+  setInsertPoint(context.break_block_id_.value());
+  if (context.break_incomings_.empty())
+  {
+    // 返回都是unit
+    return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
+  }
+  if (context.break_incomings_.size() == 1)
+  {
+    // 一个break不用
+    return ExprResult{.terminated_ = false,
+                      .operand_ = context.break_incomings_[0].operand_};
+  }
+  IRTypeId type_id = getOperandTypeId(context.break_incomings_[0].operand_);
+  return ExprResult{.terminated_ = false,
+                    .operand_ =
+                        emitPhi(type_id, std::move(context.break_incomings_))};
+}
+
+ExprResult
+IRGenerator::generateWhileExpr(const WhileExpr *while_expr,
+                               semantic::SemanticContext &semantic_ctx)
 {
   BlockId condition_block_id = newBlock();
   emitJump(condition_block_id);
   setInsertPoint(condition_block_id);
-  ExprResult condition_result = generateExpr(while_expr->condition_expr_.get(), semantic_ctx);
+  ExprResult condition_result =
+      generateExpr(while_expr->condition_expr_.get(), semantic_ctx);
   if (condition_result.terminated_)
   {
     return condition_result;
@@ -818,7 +881,8 @@ ExprResult IRGenerator::generateWhileExpr(
                                     .break_block_id_ = out_block_id,
                                     .break_incomings_ = {}});
   setInsertPoint(body_block_id);
-  ExprResult body_result = generateExpr(while_expr->block_expr_.get(), semantic_ctx);
+  ExprResult body_result =
+      generateExpr(while_expr->block_expr_.get(), semantic_ctx);
   if (!body_result.terminated_)
   {
     emitJump(condition_block_id);
@@ -829,10 +893,11 @@ ExprResult IRGenerator::generateWhileExpr(
   return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
 }
 
-ExprResult IRGenerator::generateIfExpr(
-    const IfExpr *if_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult IRGenerator::generateIfExpr(const IfExpr *if_expr,
+                                       semantic::SemanticContext &semantic_ctx)
 {
-  ExprResult condition_result = generateExpr(if_expr->condition_expr_.get(), semantic_ctx);
+  ExprResult condition_result =
+      generateExpr(if_expr->condition_expr_.get(), semantic_ctx);
   if (condition_result.terminated_)
   {
     return condition_result;
@@ -844,7 +909,8 @@ ExprResult IRGenerator::generateIfExpr(
     emitBranch(condition_result.operand_.value(), then_block_id, else_block_id);
     // then
     setInsertPoint(then_block_id);
-    ExprResult then_result = generateExpr(if_expr->block_expr_.get(), semantic_ctx);
+    ExprResult then_result =
+        generateExpr(if_expr->block_expr_.get(), semantic_ctx);
     BlockId then_end_block_id = getCurrentBlock().block_id_;
     // else or else if
     setInsertPoint(else_block_id);
@@ -889,14 +955,15 @@ ExprResult IRGenerator::generateIfExpr(
     if (then_result.operand_.has_value())
     {
       std::vector<PhiIncoming> incomings;
-      incomings.push_back(PhiIncoming{.block_id_ = then_end_block_id,
-                                       .operand_ = then_result.operand_.value()});
-      incomings.push_back(PhiIncoming{.block_id_ = else_end_block_id,
-                                       .operand_ = else_result.operand_.value()});
+      incomings.push_back(
+          PhiIncoming{.block_id_ = then_end_block_id,
+                      .operand_ = then_result.operand_.value()});
+      incomings.push_back(
+          PhiIncoming{.block_id_ = else_end_block_id,
+                      .operand_ = else_result.operand_.value()});
       IRTypeId type_id = getOperandTypeId(then_result.operand_.value());
-      return ExprResult{
-          .terminated_ = false,
-          .operand_ = emitPhi(type_id, std::move(incomings))};
+      return ExprResult{.terminated_ = false,
+                        .operand_ = emitPhi(type_id, std::move(incomings))};
     }
     // 无值则返回 unit
     return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
@@ -906,7 +973,8 @@ ExprResult IRGenerator::generateIfExpr(
   BlockId merge_block_id = newBlock();
   emitBranch(condition_result.operand_.value(), then_block_id, merge_block_id);
   setInsertPoint(then_block_id);
-  ExprResult then_result = generateExpr(if_expr->block_expr_.get(), semantic_ctx);
+  ExprResult then_result =
+      generateExpr(if_expr->block_expr_.get(), semantic_ctx);
   // then 不终止需要最后 jump 回 merge
   if (!then_result.terminated_)
   {
@@ -917,8 +985,9 @@ ExprResult IRGenerator::generateIfExpr(
   return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
 }
 
-ExprResult IRGenerator::generateLogicalExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateLogicalExpr(const BinaryExpr *binary_expr,
+                                 semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -940,8 +1009,8 @@ ExprResult IRGenerator::generateLogicalExpr(
     short_value = 1;
     emitBranch(lhs_result.operand_.value(), merge_block_id, rhs_block_id);
   }
-  Operand short_operand = IntegerConst{.value_ = short_value,
-                                       .type_id_ = bool_type_id};
+  Operand short_operand =
+      IntegerConst{.value_ = short_value, .type_id_ = bool_type_id};
   // rhs block
   setInsertPoint(rhs_block_id);
   ExprResult rhs_result = generateExpr(binary_expr->rhs_.get(), semantic_ctx);
@@ -956,17 +1025,17 @@ ExprResult IRGenerator::generateLogicalExpr(
   emitJump(merge_block_id);
   setInsertPoint(merge_block_id);
   std::vector<PhiIncoming> incomings;
-  incomings.push_back(PhiIncoming{.block_id_ = lhs_end_block_id,
-                                   .operand_ = short_operand});
+  incomings.push_back(
+      PhiIncoming{.block_id_ = lhs_end_block_id, .operand_ = short_operand});
   incomings.push_back(PhiIncoming{.block_id_ = rhs_end_block_id,
-                                   .operand_ = rhs_result.operand_.value()});
-  return ExprResult{
-      .terminated_ = false,
-      .operand_ = emitPhi(bool_type_id, std::move(incomings))};
+                                  .operand_ = rhs_result.operand_.value()});
+  return ExprResult{.terminated_ = false,
+                    .operand_ = emitPhi(bool_type_id, std::move(incomings))};
 }
 
-ExprResult IRGenerator::generateEqualityExpr(
-    const BinaryExpr *binary_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateEqualityExpr(const BinaryExpr *binary_expr,
+                                  semantic::SemanticContext &semantic_ctx)
 {
   ExprResult lhs_result = generateExpr(binary_expr->lhs_.get(), semantic_ctx);
   if (lhs_result.terminated_)
@@ -980,9 +1049,10 @@ ExprResult IRGenerator::generateEqualityExpr(
   }
   Operand lhs_operand = lhs_result.operand_.value();
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
-  Operand result = generateEquality(
-      lhs_info.type_id_, lhs_operand, rhs_operand, semantic_ctx);
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(binary_expr->lhs_.get());
+  Operand result = generateEquality(lhs_info.type_id_, lhs_operand, rhs_operand,
+                                    semantic_ctx);
   if (binary_expr->op_ == BinaryOperator::NotEqual)
   {
     // != 结果取反
@@ -993,8 +1063,9 @@ ExprResult IRGenerator::generateEqualityExpr(
   return ExprResult{.terminated_ = false, .operand_ = result};
 }
 
-ExprResult IRGenerator::generateAssignExpr(
-    const AssignExpr *assign_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateAssignExpr(const AssignExpr *assign_expr,
+                                semantic::SemanticContext &semantic_ctx)
 {
   if (assign_expr->op_ != AssignmentOperator::Assign)
   {
@@ -1007,7 +1078,8 @@ ExprResult IRGenerator::generateAssignExpr(
   {
     return rhs_result;
   }
-  ExprResult place_result = getPlaceAddress(assign_expr->lhs_.get(), semantic_ctx);
+  ExprResult place_result =
+      getPlaceAddress(assign_expr->lhs_.get(), semantic_ctx);
   if (place_result.terminated_)
   {
     return place_result;
@@ -1017,8 +1089,9 @@ ExprResult IRGenerator::generateAssignExpr(
   return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
 }
 
-ExprResult IRGenerator::generateCompoundAssignExpr(
-    const AssignExpr *assign_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateCompoundAssignExpr(const AssignExpr *assign_expr,
+                                        semantic::SemanticContext &semantic_ctx)
 {
   // 求rhs与lhs_place
   ExprResult rhs_result = generateExpr(assign_expr->rhs_.get(), semantic_ctx);
@@ -1026,28 +1099,34 @@ ExprResult IRGenerator::generateCompoundAssignExpr(
   {
     return rhs_result;
   }
-  ExprResult place_result = getPlaceAddress(assign_expr->lhs_.get(), semantic_ctx);
+  ExprResult place_result =
+      getPlaceAddress(assign_expr->lhs_.get(), semantic_ctx);
   if (place_result.terminated_)
   {
     return place_result;
   }
   auto rhs_ptr = std::get_if<Value>(&place_result.operand_.value());
   Operand rhs_operand = rhs_result.operand_.value();
-  const auto &lhs_info = semantic_ctx.expr_to_exprinfos_.at(assign_expr->lhs_.get());
+  const auto &lhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(assign_expr->lhs_.get());
   IRTypeId type_id = lowerType(lhs_info.type_id_, semantic_ctx);
   Operand lhs_operand = emitLoad(type_id, *rhs_ptr);
-  const auto &rhs_info = semantic_ctx.expr_to_exprinfos_.at(assign_expr->rhs_.get());
+  const auto &rhs_info =
+      semantic_ctx.expr_to_exprinfos_.at(assign_expr->rhs_.get());
   const auto &rhs_type = semantic_ctx.getType(rhs_info.type_id_);
-  if (auto reference_type = dynamic_cast<const semantic::ReferenceSemType *>(&rhs_type))
+  if (auto reference_type =
+          dynamic_cast<const semantic::ReferenceSemType *>(&rhs_type))
   {
     // 若为&T，load 出 T
     auto rhs_ptr = std::get_if<Value>(&rhs_operand);
-    rhs_operand = emitLoad(lowerType(reference_type->inner_type_id_, semantic_ctx), *rhs_ptr);
+    rhs_operand = emitLoad(
+        lowerType(reference_type->inner_type_id_, semantic_ctx), *rhs_ptr);
   }
   // 由语义type决定是否是有符号运算
   bool is_signed = false;
   const auto &lhs_type = semantic_ctx.getType(lhs_info.type_id_);
-  if (auto integer_type = dynamic_cast<const semantic::IntegerSemType *>(&lhs_type))
+  if (auto integer_type =
+          dynamic_cast<const semantic::IntegerSemType *>(&lhs_type))
   {
     is_signed = integer_type->integer_type_ == IntegerType::I32 ||
                 integer_type->integer_type_ == IntegerType::ISize;
@@ -1123,28 +1202,32 @@ ExprResult IRGenerator::generateCompoundAssignExpr(
   return ExprResult{.terminated_ = false, .operand_ = std::nullopt};
 }
 
-ExprResult IRGenerator::generateCastExpr(
-    const CastExpr *cast_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateCastExpr(const CastExpr *cast_expr,
+                              semantic::SemanticContext &semantic_ctx)
 {
   ExprResult result = generateExpr(cast_expr->expr_.get(), semantic_ctx);
   if (result.terminated_)
   {
     return result;
   }
-  const auto &operand_info = semantic_ctx.expr_to_exprinfos_.at(cast_expr->expr_.get());
+  const auto &operand_info =
+      semantic_ctx.expr_to_exprinfos_.at(cast_expr->expr_.get());
   const auto &operand_type = semantic_ctx.getType(operand_info.type_id_);
   if (dynamic_cast<const semantic::BoolSemType *>(&operand_type))
   {
     const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(cast_expr);
     IRTypeId type_id = lowerType(expr_info.type_id_, semantic_ctx);
-    result.operand_ = emitCast(CastOp::ZeroExt, result.operand_.value(), type_id);
+    result.operand_ =
+        emitCast(CastOp::ZeroExt, result.operand_.value(), type_id);
   }
   // 所有整数均为 i32，整数之间转换不用生成实际行
   return result;
 }
 
-ExprResult IRGenerator::generateIndexExpr(
-    const IndexExpr *index_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateIndexExpr(const IndexExpr *index_expr,
+                               semantic::SemanticContext &semantic_ctx)
 {
   ExprResult place_result = getPlaceAddress(index_expr, semantic_ctx);
   if (place_result.terminated_)
@@ -1154,12 +1237,12 @@ ExprResult IRGenerator::generateIndexExpr(
   const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(index_expr);
   IRTypeId type_id = lowerType(expr_info.type_id_, semantic_ctx);
   auto ptr = std::get_if<Value>(&place_result.operand_.value());
-  return ExprResult{.terminated_ = false,
-                    .operand_ = emitLoad(type_id, *ptr)};
+  return ExprResult{.terminated_ = false, .operand_ = emitLoad(type_id, *ptr)};
 }
 
-ExprResult IRGenerator::generateMemberExpr(
-    const MemberExpr *member_expr, semantic::SemanticContext &semantic_ctx)
+ExprResult
+IRGenerator::generateMemberExpr(const MemberExpr *member_expr,
+                                semantic::SemanticContext &semantic_ctx)
 {
   ExprResult place_result = getPlaceAddress(member_expr, semantic_ctx);
   if (place_result.terminated_)
@@ -1170,8 +1253,7 @@ ExprResult IRGenerator::generateMemberExpr(
   const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(member_expr);
   IRTypeId type_id = lowerType(expr_info.type_id_, semantic_ctx);
   auto ptr = std::get_if<Value>(&place_result.operand_.value());
-  return ExprResult{.terminated_ = false,
-                    .operand_ = emitLoad(type_id, *ptr)};
+  return ExprResult{.terminated_ = false, .operand_ = emitLoad(type_id, *ptr)};
 }
 
 ExprResult
@@ -1255,15 +1337,16 @@ IRGenerator::generateUnaryExpr(const UnaryExpr *unary_expr,
   return ExprResult{.terminated_ = false, .operand_ = result};
 }
 
-Operand IRGenerator::generateEquality(
-    semantic::TypeId type_id, Operand lhs_operand, Operand rhs_operand,
-    semantic::SemanticContext &semantic_ctx)
+Operand IRGenerator::generateEquality(semantic::TypeId type_id,
+                                      Operand lhs_operand, Operand rhs_operand,
+                                      semantic::SemanticContext &semantic_ctx)
 {
 }
 
-semantic::TypeId IRGenerator::getDereferencedTypeId(
-    semantic::TypeId type_id, semantic::DerefKind deref_kind,
-    semantic::SemanticContext &semantic_ctx)
+semantic::TypeId
+IRGenerator::getDereferencedTypeId(semantic::TypeId type_id,
+                                   semantic::DerefKind deref_kind,
+                                   semantic::SemanticContext &semantic_ctx)
 {
   const auto &type = semantic_ctx.getType(type_id);
   if (deref_kind == semantic::DerefKind::Reference)
@@ -1449,8 +1532,8 @@ Value IRGenerator::emitCast(CastOp op, Operand operand, IRTypeId to_type_id)
   return result;
 }
 
-Value IRGenerator::emitGetElementPtr(
-    IRTypeId type_id, Value ptr, std::vector<Operand> indices)
+Value IRGenerator::emitGetElementPtr(IRTypeId type_id, Value ptr,
+                                     std::vector<Operand> indices)
 {
   Value result = newValue(module_.ir_type_table_.getOrCreatePointerType());
   emit(GetElementPtrInst{.return_ptr_ = result,
