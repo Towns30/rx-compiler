@@ -6,7 +6,9 @@
 #include "RxLexer.h"
 #include "RxParser.h"
 #include "frontend/AstBuilder.h"
+#include "ir/IRGenerator.h"
 #include "semantic/SemanticAnalyzer.h"
+#include "ir/IRPrinter.h"
 
 void printTree(antlr4::tree::ParseTree *node, const rx::RxParser &parser,
                int depth = 0)
@@ -65,5 +67,10 @@ int main(int argc, char *argv[])
   {
     return 1;
   }
+  ir::IRGenerator ir_generator(ast_tree.get());
+  ir::Module module = ir_generator.generateIR(semantic_context);
+  std::ofstream output("ir_output.ll");
+  ir::IRPrinter ir_printer(module.ir_type_table_, output);
+  ir_printer.printIR(module);
   return 0;
 }

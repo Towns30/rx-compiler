@@ -17,6 +17,9 @@ add_executable(rx-compiler
     src/main.cpp
     src/ast/Ast.cpp
     src/frontend/AstBuilder.cpp
+    src/ir/IRTypeTable.cpp
+    src/ir/IRPrinter.cpp
+    src/ir/IRGenerator.cpp
     generated/RxLexer.cpp
     generated/RxParser.cpp
     src/semantic/SemanticAnalyzer.cpp

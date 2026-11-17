@@ -410,11 +410,45 @@ ExprResult IRGenerator::getPlaceAddress(const Expr *expr,
   return ExprResult{.terminated_ = false, .operand_ = addr};
 }
 
+ExprResult IRGenerator::generateStructExpr(
+    const StructExpr *struct_expr, semantic::SemanticContext &semantic_ctx)
+{
+  std::vector<Operand> fields;
+  // 字段初始化按源码顺序求值
+  for (const auto &field : struct_expr->struct_fields_)
+  {
+    ExprResult field_result = generateExpr(field.expr_.get(), semantic_ctx);
+    // 有一表达式终止则直接返回
+    if (field_result.terminated_)
+    {
+      return field_result;
+    }
+    fields.push_back(field_result.operand_.value());
+  }
+  const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(struct_expr);
+  IRTypeId struct_type_id = lowerType(expr_info.type_id_, semantic_ctx);
+  Value struct_addr = emitAlloca(struct_type_id);
+  IRTypeId index_type_id = module_.ir_type_table_.getOrCreateIntegerType(32);
+  for (std::size_t i = 0; i < fields.size(); i++)
+  {
+    std::vector<Operand> indices;
+    indices.push_back(IntegerConst{.value_ = 0, .type_id_ = index_type_id});
+    // 存储位置使用声明字段编号。
+    indices.push_back(IntegerConst{.value_ = expr_info.struct_field_ids_[i],
+                                    .type_id_ = index_type_id});
+    Value field_addr = emitGetElementPtr(struct_type_id, struct_addr, std::move(indices));
+    emitStore(fields[i], field_addr);
+  }
+  return ExprResult{.terminated_ = false,
+                    .operand_ = emitLoad(struct_type_id, struct_addr)};
+}
+
 ExprResult IRGenerator::generateArrayExpr(
     const ArrayExpr *array_expr, semantic::SemanticContext &semantic_ctx)
 {
   if (array_expr->is_repeat_)
   {
+    // 重复式
     ExprResult element_result = generateExpr(array_expr->repeat_expr_.get(), semantic_ctx);
     if (element_result.terminated_)
     {
