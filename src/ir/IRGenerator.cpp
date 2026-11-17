@@ -410,6 +410,63 @@ ExprResult IRGenerator::getPlaceAddress(const Expr *expr,
   return ExprResult{.terminated_ = false, .operand_ = addr};
 }
 
+ExprResult IRGenerator::generateArrayExpr(
+    const ArrayExpr *array_expr, semantic::SemanticContext &semantic_ctx)
+{
+  if (array_expr->is_repeat_)
+  {
+    ExprResult element_result = generateExpr(array_expr->repeat_expr_.get(), semantic_ctx);
+    if (element_result.terminated_)
+    {
+      return element_result;
+    }
+    Operand element = element_result.operand_.value();
+    const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(array_expr);
+    const auto *array_type = dynamic_cast<const semantic::ArraySemType *>(
+        &semantic_ctx.getType(expr_info.type_id_));
+    IRTypeId array_type_id = lowerType(expr_info.type_id_, semantic_ctx);
+    Value array_addr = emitAlloca(array_type_id);
+    IRTypeId index_type_id = module_.ir_type_table_.getOrCreateIntegerType(32);
+    // store进去
+    for (std::size_t i = 0; i < static_cast<std::size_t>(array_type->length_); i++)
+    {
+      std::vector<Operand> indices;
+      indices.push_back(IntegerConst{.value_ = 0, .type_id_ = index_type_id});
+      indices.push_back(IntegerConst{.value_ = i, .type_id_ = index_type_id});
+      Value element_addr = emitGetElementPtr(array_type_id, array_addr, std::move(indices));
+      emitStore(element, element_addr);
+    }
+    return ExprResult{.terminated_ = false,
+                      .operand_ = emitLoad(array_type_id, array_addr)};
+  }
+  // 枚举式
+  std::vector<Operand> elements;
+  for (const auto &element_expr : array_expr->exprs_)
+  {
+    ExprResult element_result = generateExpr(element_expr.get(), semantic_ctx);
+    if (element_result.terminated_)
+    {
+      return element_result;
+    }
+    elements.push_back(element_result.operand_.value());
+  }
+  const auto &expr_info = semantic_ctx.expr_to_exprinfos_.at(array_expr);
+  IRTypeId array_type_id = lowerType(expr_info.type_id_, semantic_ctx);
+  Value array_addr = emitAlloca(array_type_id);
+  IRTypeId index_type_id = module_.ir_type_table_.getOrCreateIntegerType(32);
+  // 逐个store
+  for (std::size_t i = 0; i < elements.size(); i++)
+  {
+    std::vector<Operand> indices;
+    indices.push_back(IntegerConst{.value_ = 0, .type_id_ = index_type_id});
+    indices.push_back(IntegerConst{.value_ = i, .type_id_ = index_type_id});
+    Value element_addr = emitGetElementPtr(array_type_id, array_addr, std::move(indices));
+    emitStore(elements[i], element_addr);
+  }
+  return ExprResult{.terminated_ = false,
+                    .operand_ = emitLoad(array_type_id, array_addr)};
+}
+
 ExprResult
 IRGenerator::generateLiteralExpr(const LiteralExpr *literal_expr,
                                  semantic::SemanticContext &semantic_ctx)
